@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engram"
+version = "1.0.0"
+description = "Local-first project memory for AI coding agents"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+engram = "engram.cli:cli"
+engram-mcp = "engram.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
