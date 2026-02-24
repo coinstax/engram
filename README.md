@@ -176,7 +176,7 @@ Engram also works as a standalone CLI for non-MCP agents or manual use:
 ```bash
 # Post events
 engram post -t decision -c "Using Redis for session cache — latency requirements" -s src/cache.py
-engram post -t warning -c "Don't touch migration files — pending deploy" -s db/migrations
+engram post -t warning -c "Don't touch migration files — pending deploy" -s db/migrations --priority critical
 engram post -t outcome -c "Cache fix worked" -r evt-abc123  # link to related event
 
 # Query
@@ -188,6 +188,13 @@ engram query --related-to evt-abc123
 # Briefing
 engram briefing
 engram briefing --since 24h -s src/auth
+engram briefing --focus src/auth            # scope-aware: highlights auth-related events
+engram briefing --resolved-window 24        # show events resolved in last 24h
+
+# Lifecycle management
+engram resolve evt-abc123 --reason "Fixed in PR #42"
+engram supersede evt-abc123 --by evt-def456
+engram reopen evt-abc123
 
 # Garbage collection
 engram gc --dry-run          # preview what would be archived
@@ -202,20 +209,23 @@ engram status
 ```
 src/engram/
   models.py      — Event, QueryFilter, BriefingResult dataclasses
-  store.py       — EventStore: SQLite + WAL mode + FTS5, schema migration
+  store.py       — EventStore: SQLite + WAL mode + FTS5, schema migration (v1→v4)
   query.py       — QueryEngine: relative time parsing, structured + FTS queries
   bootstrap.py   — GitBootstrapper: mines git log + README/CLAUDE.md into seed events
-  briefing.py    — BriefingGenerator: dedup, staleness detection, time-windowed summaries
-  formatting.py  — Compact single-line and JSON formatters
+  briefing.py    — BriefingGenerator: 4-section briefings, focus ranking, dedup, staleness
+  formatting.py  — Compact single-line and JSON formatters with priority tags
+  context.py     — ContextAssembler: auto-context for consultation system prompts
   hooks.py       — Claude Code hooks: passive mutation/outcome capture, session briefing
   gc.py          — GarbageCollector: archives old events, preserves warnings/decisions
-  cli.py         — Click CLI: init, post, query, briefing, status, gc, hooks
-  mcp_server.py  — FastMCP server: post_event, query, briefing, status tools
+  cli.py         — Click CLI: init, post, query, briefing, resolve, supersede, reopen, gc, hooks
+  providers.py   — Multi-model provider dispatch (OpenAI, Google, Anthropic, xAI)
+  consultation.py — Multi-turn consultation engine with persistent conversations
+  mcp_server.py  — FastMCP server: post_event, query, briefing, status, consult tools
 ```
 
 **Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema versioned with automatic migration on connection.
 
-**Event schema:** 7 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `related_ids`. Intentionally minimal — fields that are "almost never populated" were cut during design.
+**Event schema:** 11 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `related_ids`, `status`, `priority`, `resolved_reason`, `superseded_by`. Core 7 fields are always populated; lifecycle fields (`status`, `priority`, `resolved_reason`, `superseded_by`) default to sensible values.
 
 **Design decisions:**
 - FTS5 only, no embeddings — covers 95% of queries at <10k events with zero additional dependencies
@@ -243,9 +253,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.1** — Passive observation via Claude Code hooks, event linking, CLAUDE.md auto-write, smarter briefings with dedup/staleness detection, garbage collection
 
-**v1.2** (current) — Multi-turn AI consultation system with external models (GPT-4o, Gemini Flash, Claude Sonnet), persistent conversation storage, CLI + MCP tools
+**v1.2** — Multi-turn AI consultation system with external models (GPT-4o, Gemini Flash, Claude Sonnet), persistent conversation storage, CLI + MCP tools
 
-**Next up** — Event lifecycle (resolve/supersede), event priority, scope-aware briefings, session intent, richer mutation capture, hierarchical summarization, conflict detection
+**v1.3** (current) — Event lifecycle (resolve/supersede/reopen), event priority (critical/high/normal/low), scope-aware briefings with `--focus`, 4-section briefing structure, auto-context for consultations, thinking model support
+
+**Next up** — Session intent, richer mutation capture, hierarchical summarization, conflict detection, context save/restore integration
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 

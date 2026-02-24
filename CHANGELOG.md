@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.3.0 — 2026-02-24
+
+### Added
+
+- **Event lifecycle management** — Events now have a `status` field (active/resolved/superseded). New CLI commands: `engram resolve <id> --reason "..."`, `engram supersede <id> --by <new-id>`, `engram reopen <id>`. Resolved events move out of active briefing sections into a dedicated "Recently Resolved" section.
+- **Event priority** — Events can be posted with `--priority` (critical/high/normal/low). Priority affects briefing sort order within sections. Critical and high priority events display `[CRITICAL]` or `[HIGH]` tags in compact output.
+- **Scope-aware briefings** — `engram briefing --focus src/auth` partitions events into focus-relevant (matching the path) and other active. Scope relevance scoring: exact match > parent directory > child path. Critical warnings always appear regardless of focus.
+- **4-section briefing structure** — Briefings restructured from flat type-grouped sections into ranked sections: Critical Warnings, Focus-Relevant (when --focus used), Other Active, Recently Resolved (within --resolved-window, default 48h).
+- **Auto-context for consultations** — `consult start` now assembles project context (README, warnings, decisions, discoveries, source modules) into consultation system prompts automatically. Toggle with `--context/--no-context`.
+- **Thinking model support** — Added o3 (OpenAI), claude-opus (Anthropic), and gemini-pro (Google) as thinking-enabled consultation models with provider-specific API handling.
+
+### Changed
+
+- Schema v3→v4 migration: adds `status`, `priority`, `resolved_reason`, `superseded_by_event_id` columns and `idx_events_status` index. Auto-migrates on first connection.
+- `recent_by_type()` now filters by status (default: "active"), so resolved/superseded events no longer appear in active queries.
+- Briefing compact output now shows priority tags, resolved reasons, and staleness markers inline.
+
+### Stats
+
+- 207 tests across 12 test modules
+- 14 source modules
+
+---
+
+## v1.2.0 — 2026-02-23
+
+### Added
+
+- **Multi-turn AI consultation system** — `engram consult start "topic" --models gpt-4o,gemini-flash` opens a multi-model conversation. Models respond in parallel, host can send follow-up messages. Conversations persist in SQLite.
+- **Consultation providers** — Support for OpenAI, Google GenAI, Anthropic, and xAI (Grok) via OpenAI-compatible API. Model registry with per-model configuration.
+- **Consultation MCP tools** — `consult_start`, `consult_message`, `consult_end`, `consult_list` exposed via MCP server.
+- **Consultation transcripts** — Conversations saved as markdown in `docs/consultations/`.
+
+---
+
 ## v1.1.0 — 2026-02-23
 
 ### Added
