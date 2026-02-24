@@ -4,5 +4,7 @@ __pycache__/
 *.pyc
 .env
 .engram/
+.mcp.json
+CLAUDE.md
 .pytest_cache/
 *.egg-info/
