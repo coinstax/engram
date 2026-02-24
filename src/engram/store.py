@@ -8,7 +8,7 @@ from pathlib import Path
 
 from engram.models import Event, EventType, QueryFilter
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS events (
@@ -43,6 +43,31 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id            TEXT PRIMARY KEY,
+    topic         TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active','paused','completed')),
+    models        TEXT NOT NULL,
+    system_prompt TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    summary       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    conv_id    TEXT NOT NULL REFERENCES conversations(id),
+    role       TEXT NOT NULL
+               CHECK(role IN ('system','user','assistant')),
+    sender     TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_messages_conv
+    ON conversation_messages(conv_id, id);
 """
 
 
@@ -97,7 +122,36 @@ class EventStore:
                 self._conn.execute(
                     "ALTER TABLE events ADD COLUMN related_ids TEXT"
                 )
-            self.set_meta("schema_version", str(SCHEMA_VERSION))
+            self.set_meta("schema_version", "2")
+
+        if version < 3:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id            TEXT PRIMARY KEY,
+                    topic         TEXT NOT NULL,
+                    status        TEXT NOT NULL DEFAULT 'active'
+                                  CHECK(status IN ('active','paused','completed')),
+                    models        TEXT NOT NULL,
+                    system_prompt TEXT,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL,
+                    summary       TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS conversation_messages (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conv_id    TEXT NOT NULL REFERENCES conversations(id),
+                    role       TEXT NOT NULL
+                               CHECK(role IN ('system','user','assistant')),
+                    sender     TEXT NOT NULL,
+                    content    TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_conv_messages_conv
+                    ON conversation_messages(conv_id, id);
+            """)
+            self.set_meta("schema_version", "3")
 
     @staticmethod
     def _generate_id() -> str:

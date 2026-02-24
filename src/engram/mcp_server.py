@@ -167,6 +167,130 @@ def status() -> str:
         store.close()
 
 
+@mcp.tool()
+def start_consultation(
+    topic: str,
+    models: str,
+    system_prompt: str | None = None,
+    initial_message: str | None = None,
+) -> str:
+    """Start a multi-turn consultation with external AI models.
+
+    Creates a new conversation where you can discuss design decisions,
+    get feedback, and have back-and-forth discussions with other models.
+
+    Args:
+        topic: What the consultation is about
+        models: Comma-separated model keys: gpt-4o, gemini-flash, claude-sonnet
+        system_prompt: Optional context/instructions for all models
+        initial_message: If provided, sends this message and returns responses immediately
+    """
+    from engram.consult import ConsultationEngine
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+        engine = ConsultationEngine(store, project_dir=project_dir)
+        model_list = [m.strip() for m in models.split(",")]
+
+        conv_id = engine.start(topic, model_list, system_prompt=system_prompt)
+        result = f"Started consultation {conv_id}\nTopic: {topic}\nModels: {', '.join(model_list)}"
+
+        if initial_message:
+            engine.add_message(conv_id, initial_message)
+            responses = engine.get_responses(conv_id)
+            result += f"\n\n> {initial_message}\n"
+            for r in responses:
+                result += f"\n--- {r['sender']} ---\n{r['content']}\n"
+
+        return result
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def consult_say(
+    conv_id: str,
+    message: str,
+    models: str | None = None,
+) -> str:
+    """Send a message in an active consultation and get responses from all models.
+
+    Args:
+        conv_id: Conversation ID (conv-...)
+        message: Your message to the models
+        models: Optional comma-separated model keys to override which models respond
+    """
+    from engram.consult import ConsultationEngine
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+        engine = ConsultationEngine(store, project_dir=project_dir)
+
+        engine.add_message(conv_id, message)
+        model_list = [m.strip() for m in models.split(",")] if models else None
+        responses = engine.get_responses(conv_id, models=model_list)
+
+        result = f"> {message}\n"
+        for r in responses:
+            result += f"\n--- {r['sender']} ---\n{r['content']}\n"
+        return result
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def consult_show(conv_id: str) -> str:
+    """Show the full history of a consultation.
+
+    Args:
+        conv_id: Conversation ID (conv-...)
+    """
+    from engram.consult import ConsultationEngine
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+        engine = ConsultationEngine(store, project_dir=project_dir)
+        conv = engine.get_conversation(conv_id)
+
+        result = f"# {conv['topic']} [{conv['status']}]\n"
+        result += f"ID: {conv['id']} | Models: {', '.join(conv['models'])}\n"
+        if conv["system_prompt"]:
+            result += f"System: {conv['system_prompt']}\n"
+        result += "\n"
+        for msg in conv["messages"]:
+            result += f"[{msg['sender']}] ({msg['role']}):\n{msg['content']}\n\n"
+        if conv["summary"]:
+            result += f"Summary: {conv['summary']}\n"
+        return result
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def consult_done(
+    conv_id: str,
+    summary: str | None = None,
+) -> str:
+    """Mark a consultation as completed.
+
+    Args:
+        conv_id: Conversation ID (conv-...)
+        summary: Optional summary of the consultation outcome
+    """
+    from engram.consult import ConsultationEngine
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+        engine = ConsultationEngine(store, project_dir=project_dir)
+        engine.complete(conv_id, summary=summary)
+        result = f"Completed: {conv_id}"
+        if summary:
+            result += f"\nSummary: {summary}"
+        return result
+    finally:
+        store.close()
+
+
 def main():
     """Entry point for engram-mcp console script."""
     mcp.run(transport="stdio")

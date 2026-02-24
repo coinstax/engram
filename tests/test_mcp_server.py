@@ -2,6 +2,7 @@
 
 import json
 import os
+from unittest.mock import patch
 
 import pytest
 
@@ -159,3 +160,53 @@ class TestMCPTools:
         result = query(related_to="evt-target", event_type="decision")
         assert "Linked decision" in result
         assert "Linked outcome" not in result
+
+
+class TestMCPConsultation:
+
+    def test_start_consultation(self, mcp_project):
+        from engram.mcp_server import start_consultation
+        result = start_consultation(topic="Test topic", models="gpt-4o")
+        assert "Started consultation" in result
+        assert "conv-" in result
+        assert "Test topic" in result
+
+    @patch("engram.consult.providers.send_message", return_value="Model says hello")
+    def test_start_consultation_with_message(self, mock_send, mcp_project):
+        from engram.mcp_server import start_consultation
+        result = start_consultation(
+            topic="Test", models="gpt-4o",
+            initial_message="What do you think?"
+        )
+        assert "What do you think?" in result
+        assert "Model says hello" in result
+        assert "gpt-4o" in result
+
+    @patch("engram.consult.providers.send_message", return_value="Response text")
+    def test_consult_say(self, mock_send, mcp_project):
+        from engram.mcp_server import start_consultation, consult_say
+        start_result = start_consultation(topic="Test", models="gpt-4o")
+        # Extract conv_id
+        conv_id = start_result.split("Started consultation ")[1].split("\n")[0].strip()
+
+        result = consult_say(conv_id=conv_id, message="Follow-up question")
+        assert "Follow-up question" in result
+        assert "Response text" in result
+
+    def test_consult_show(self, mcp_project):
+        from engram.mcp_server import start_consultation, consult_show
+        start_result = start_consultation(topic="Show test", models="gpt-4o")
+        conv_id = start_result.split("Started consultation ")[1].split("\n")[0].strip()
+
+        result = consult_show(conv_id=conv_id)
+        assert "Show test" in result
+        assert "[active]" in result
+
+    def test_consult_done(self, mcp_project):
+        from engram.mcp_server import start_consultation, consult_done
+        start_result = start_consultation(topic="Done test", models="gpt-4o")
+        conv_id = start_result.split("Started consultation ")[1].split("\n")[0].strip()
+
+        result = consult_done(conv_id=conv_id, summary="Decided X")
+        assert "Completed" in result
+        assert "Decided X" in result

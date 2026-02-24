@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engram"
-version = "1.1.0"
+version = "1.2.0"
 description = "Local-first project memory for AI coding agents"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,7 +13,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
+consult = ["openai>=1.0", "google-genai>=1.0", "httpx>=0.25", "python-dotenv>=1.0"]
 dev = ["pytest>=8.0"]
+all = ["mcp>=1.0", "openai>=1.0", "google-genai>=1.0", "httpx>=0.25", "python-dotenv>=1.0"]
 
 [project.scripts]
 engram = "engram.cli:cli"

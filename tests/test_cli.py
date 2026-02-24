@@ -203,6 +203,96 @@ class TestGC:
         assert "No events to archive" in result.output
 
 
+class TestConsultCLI:
+
+    def _init_project(self, runner, project):
+        runner.invoke(cli, ["-p", str(project), "init"])
+
+    @pytest.fixture
+    def init_project(self, runner, git_project):
+        self._init_project(runner, git_project)
+        return git_project
+
+    def test_consult_start(self, runner, init_project):
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "Test topic", "-m", "gpt-4o"
+        ])
+        assert result.exit_code == 0
+        assert "Started consultation:" in result.output
+        assert "conv-" in result.output
+
+    def test_consult_start_unknown_model(self, runner, init_project):
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "Test", "-m", "bad-model"
+        ])
+        assert result.exit_code != 0
+        assert "Error" in result.output
+
+    def test_consult_ls_empty(self, runner, init_project):
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "ls"
+        ])
+        assert result.exit_code == 0
+        assert "(no consultations)" in result.output
+
+    def test_consult_ls_shows_conversation(self, runner, init_project):
+        runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "My topic", "-m", "gpt-4o"
+        ])
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "ls"
+        ])
+        assert result.exit_code == 0
+        assert "My topic" in result.output
+        assert "[active]" in result.output
+
+    def test_consult_show(self, runner, init_project):
+        # Start a conversation and capture conv_id
+        start_result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "Show test", "-m", "gpt-4o"
+        ])
+        conv_id = start_result.output.split("Started consultation: ")[1].split("\n")[0].strip()
+
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "show", conv_id
+        ])
+        assert result.exit_code == 0
+        assert "Show test" in result.output
+
+    def test_consult_done(self, runner, init_project):
+        start_result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "Done test", "-m", "gpt-4o"
+        ])
+        conv_id = start_result.output.split("Started consultation: ")[1].split("\n")[0].strip()
+
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "done", conv_id,
+            "--summary", "We decided X"
+        ])
+        assert result.exit_code == 0
+        assert "Completed:" in result.output
+
+    def test_consult_extract(self, runner, init_project):
+        start_result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "start",
+            "-t", "Extract test", "-m", "gpt-4o"
+        ])
+        conv_id = start_result.output.split("Started consultation: ")[1].split("\n")[0].strip()
+
+        result = runner.invoke(cli, [
+            "-p", str(init_project), "consult", "extract", conv_id,
+            "-t", "decision", "-c", "We chose SQLite"
+        ])
+        assert result.exit_code == 0
+        assert "[decision]" in result.output
+        assert "evt-" in result.output
+
+
 class TestHooksInstall:
 
     def test_hooks_install(self, runner, git_project):

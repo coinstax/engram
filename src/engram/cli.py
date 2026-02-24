@@ -272,6 +272,193 @@ def gc(ctx, max_age, dry_run):
     store.close()
 
 
+# --- Consultation commands ---
+
+@cli.group()
+@click.pass_context
+def consult(ctx):
+    """Multi-turn AI consultations with external models."""
+    pass
+
+
+@consult.command("start")
+@click.option("--topic", "-t", required=True, help="Conversation topic")
+@click.option("--models", "-m", required=True, help="Comma-separated model keys (gpt-4o,gemini-flash,claude-sonnet)")
+@click.option("--system", "-s", default=None, help="System prompt for all models")
+@click.option("--message", "-M", default=None, help="Initial message (sends and gets responses immediately)")
+@click.pass_context
+def consult_start(ctx, topic, models, system, message):
+    """Start a new consultation."""
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    model_list = [m.strip() for m in models.split(",")]
+    engine = ConsultationEngine(store, project_dir=project)
+
+    try:
+        conv_id = engine.start(topic, model_list, system_prompt=system)
+        click.echo(f"Started consultation: {conv_id}")
+        click.echo(f"Topic: {topic}")
+        click.echo(f"Models: {', '.join(model_list)}")
+
+        if message:
+            engine.add_message(conv_id, message)
+            click.echo(f"\n> {message}\n")
+            responses = engine.get_responses(conv_id)
+            for r in responses:
+                click.echo(f"--- {r['sender']} ---")
+                click.echo(r["content"])
+                click.echo()
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@consult.command("say")
+@click.argument("conv_id")
+@click.argument("message")
+@click.option("--models", "-m", default=None, help="Override models for this turn")
+@click.pass_context
+def consult_say(ctx, conv_id, message, models):
+    """Send a message and get responses."""
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+    engine = ConsultationEngine(store, project_dir=project)
+
+    try:
+        engine.add_message(conv_id, message)
+        click.echo(f"> {message}\n")
+
+        model_list = [m.strip() for m in models.split(",")] if models else None
+        responses = engine.get_responses(conv_id, models=model_list)
+        for r in responses:
+            click.echo(f"--- {r['sender']} ---")
+            click.echo(r["content"])
+            click.echo()
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@consult.command("show")
+@click.argument("conv_id")
+@click.option("--format", "-f", "fmt", default="compact",
+              type=click.Choice(["compact", "json"]))
+@click.pass_context
+def consult_show(ctx, conv_id, fmt):
+    """Show full conversation history."""
+    import json as _json
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+    engine = ConsultationEngine(store, project_dir=project)
+
+    try:
+        conv = engine.get_conversation(conv_id)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if fmt == "json":
+        click.echo(_json.dumps(conv, indent=2))
+    else:
+        click.echo(f"# {conv['topic']} [{conv['status']}]")
+        click.echo(f"ID: {conv['id']} | Models: {', '.join(conv['models'])}")
+        if conv["system_prompt"]:
+            click.echo(f"System: {conv['system_prompt']}")
+        click.echo()
+        for msg in conv["messages"]:
+            click.echo(f"[{msg['sender']}] ({msg['role']}):")
+            click.echo(msg["content"])
+            click.echo()
+        if conv["summary"]:
+            click.echo(f"Summary: {conv['summary']}")
+
+    store.close()
+
+
+@consult.command("ls")
+@click.option("--status", default=None, type=click.Choice(["active", "paused", "completed"]))
+@click.option("--format", "-f", "fmt", default="compact",
+              type=click.Choice(["compact", "json"]))
+@click.pass_context
+def consult_ls(ctx, status, fmt):
+    """List consultations."""
+    import json as _json
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+    engine = ConsultationEngine(store, project_dir=project)
+
+    convs = engine.list_conversations(status=status)
+
+    if fmt == "json":
+        click.echo(_json.dumps(convs, indent=2))
+    else:
+        if not convs:
+            click.echo("(no consultations)")
+        else:
+            for c in convs:
+                click.echo(
+                    f"{c['id']} [{c['status']}] {c['topic']} "
+                    f"({c['message_count']} msgs, {', '.join(c['models'])})"
+                )
+
+    store.close()
+
+
+@consult.command("done")
+@click.argument("conv_id")
+@click.option("--summary", default=None, help="Conversation summary")
+@click.pass_context
+def consult_done(ctx, conv_id, summary):
+    """Mark a consultation as completed."""
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+    engine = ConsultationEngine(store, project_dir=project)
+
+    try:
+        result = engine.complete(conv_id, summary=summary)
+        click.echo(f"Completed: {conv_id}")
+        if summary:
+            click.echo(f"Summary: {summary}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@consult.command("extract")
+@click.argument("conv_id")
+@click.option("--type", "-t", "event_type", required=True,
+              type=click.Choice(["discovery", "decision", "warning"]))
+@click.option("--content", "-c", required=True, help="Event content to extract")
+@click.pass_context
+def consult_extract(ctx, conv_id, event_type, content):
+    """Extract an Engram event from a consultation."""
+    from engram.consult import ConsultationEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+    engine = ConsultationEngine(store, project_dir=project)
+
+    try:
+        event_id = engine.extract_event(conv_id, event_type, content)
+        click.echo(f"Extracted [{event_type}] {event_id} linked to {conv_id}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
 # --- Hook management (user-facing) ---
 
 @cli.group()

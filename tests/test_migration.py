@@ -164,3 +164,107 @@ class TestMigration:
         empty = store.query_related("evt-nonexistent")
         assert len(empty) == 0
         store.close()
+
+
+V2_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS events (
+    id          TEXT PRIMARY KEY,
+    timestamp   TEXT NOT NULL,
+    event_type  TEXT NOT NULL
+                CHECK(event_type IN ('discovery','decision','warning','mutation','outcome')),
+    agent_id    TEXT NOT NULL,
+    content     TEXT NOT NULL
+                CHECK(length(content) <= 2000),
+    scope       TEXT,
+    related_ids TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_type      ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_agent     ON events(agent_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+    content,
+    scope,
+    content=events,
+    content_rowid=rowid
+);
+
+CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
+    INSERT INTO events_fts(rowid, content, scope)
+    VALUES (new.rowid, new.content, new.scope);
+END;
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+
+def create_v2_db(path: Path) -> None:
+    """Create a v2.0 database (has related_ids but no conversations tables)."""
+    conn = sqlite3.connect(str(path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript(V2_SCHEMA_SQL)
+    conn.execute(
+        "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("evt-v2-test", "2026-02-22T10:00:00+00:00", "decision",
+         "test-agent", "A v2.0 decision", '["src/new.py"]', '["evt-v1-test"]'),
+    )
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?)",
+        ("schema_version", "2"),
+    )
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?)",
+        ("project_name", "test-project"),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestV2ToV3Migration:
+
+    def test_v2_db_migrates_to_v3(self, tmp_path):
+        """Opening a v2 DB with v3 code should create conversations tables."""
+        db_path = tmp_path / "events.db"
+        create_v2_db(db_path)
+
+        store = EventStore(db_path)
+        _ = store.count()  # triggers migration
+
+        # Verify conversations table exists
+        tables = {
+            row[0] for row in
+            store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "conversations" in tables
+        assert "conversation_messages" in tables
+
+        # Verify schema version
+        assert store.get_meta("schema_version") == "3"
+
+        # Verify existing events survived
+        assert store.count() == 1
+        events = store.query_fts("decision", limit=10)
+        assert len(events) == 1
+        assert events[0].id == "evt-v2-test"
+        assert events[0].related_ids == ["evt-v1-test"]
+        store.close()
+
+    def test_v2_to_v3_migration_is_idempotent(self, tmp_path):
+        db_path = tmp_path / "events.db"
+        create_v2_db(db_path)
+
+        store = EventStore(db_path)
+        _ = store.count()
+        store.close()
+
+        store2 = EventStore(db_path)
+        assert store2.count() == 1
+        assert store2.get_meta("schema_version") == "3"
+        store2.close()
