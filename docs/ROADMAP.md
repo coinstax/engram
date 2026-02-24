@@ -114,11 +114,24 @@ The SessionStart hook could auto-register sessions.
 
 Depends on session intent (#6) to know what agents are currently active.
 
+#### 8. Context Save/Restore Integration
+**Problem:** Context save/restore tools (e.g., Claude Code's `/tools:context-save` and `/tools:context-restore`) write static markdown snapshots to `.claude/context/`. Meanwhile, Engram already accumulates rich, structured, searchable context throughout every session — but the two systems are completely disconnected. Agents manually duplicate work that Engram already does.
+
+**Solution:** Integrate Engram as the primary backend for context save/restore:
+- **Context Save** (`engram checkpoint`): Post a `checkpoint` event (new type) summarizing session work, key decisions, current state, and next steps. Optionally still write a markdown file for offline/non-MCP access. The checkpoint event links to the session's decisions, warnings, and discoveries via `related_ids`.
+- **Context Restore** (`engram briefing` as primary): Restore calls `engram briefing` first for structured project state. Falls back to markdown files only if Engram isn't available.
+- **CLI**: `engram checkpoint --summary "Shipped v1.2, planned P0 features" --next "Implement event lifecycle"`
+- **MCP**: `save_checkpoint` tool, and `briefing` already serves as restore
+
+This closes the loop — agents that use Engram don't need a separate context persistence mechanism. The briefing *is* the restored context.
+
+Standalone — no dependencies on other features, though benefits from session intent (#6) for auto-populating checkpoint scope.
+
 ---
 
 ### P2 — Medium
 
-#### 8. Outcome Tracking / Decision-Outcome Linking
+#### 9. Outcome Tracking / Decision-Outcome Linking
 **Problem:** Decisions are recorded but their outcomes aren't systematically linked. "We chose bcrypt" → later "bcrypt caused performance issues" should be a connected chain.
 
 **Solution:** Formalize the decision→outcome pattern:
@@ -128,7 +141,7 @@ Depends on session intent (#6) to know what agents are currently active.
 
 The related_ids infrastructure exists — this is about conventions and briefing logic.
 
-#### 9. Cross-Project Knowledge
+#### 10. Cross-Project Knowledge
 **Problem:** Knowledge is siloed per project. If I learn "pytest-xdist breaks with SQLite in-memory DBs" in project A, I'll rediscover it in project B.
 
 **Solution:** Global event store at `~/.engram/global.db`:
@@ -139,7 +152,7 @@ The related_ids infrastructure exists — this is about conventions and briefing
 
 Keep it optional — most events are project-specific, and that's correct.
 
-#### 10. Multi-Agent Awareness
+#### 11. Multi-Agent Awareness
 **Problem:** No visibility into what other agents are currently doing in the same project.
 
 **Solution:** Build on session intent (#6):
@@ -149,7 +162,7 @@ Keep it optional — most events are project-specific, and that's correct.
 
 Requires sessions table from #6.
 
-#### 11. Smarter Briefing Ranking
+#### 12. Smarter Briefing Ranking
 **Problem:** Events are listed chronologically within sections. More relevant events should surface higher.
 
 **Solution:** Relevance scoring combining:
@@ -165,7 +178,7 @@ This is an evolution of scope-aware briefings (#2) and priority (#3) — becomes
 
 ### P3 — Low / Deferred
 
-#### 12. Semantic Search with Embeddings
+#### 13. Semantic Search with Embeddings
 **Problem:** FTS5 keyword matching misses conceptually related results (searching "auth" doesn't find events about "login" or "JWT").
 
 **Solution:** Optional embedding layer:
@@ -176,7 +189,7 @@ This is an evolution of scope-aware briefings (#2) and priority (#3) — becomes
 
 Deferred because FTS5 covers 95%+ of queries under 10k events, and the dependency cost (torch, sentence-transformers) contradicts the zero-dep philosophy. Revisit when projects regularly exceed 10k events.
 
-#### 13. Subscription / Notification System
+#### 14. Subscription / Notification System
 **Problem:** Agents have no way to be alerted when a relevant event is posted (e.g., a warning on a file they're editing).
 
 **Solution:** Watch/subscribe mechanism:
@@ -187,13 +200,13 @@ Deferred because FTS5 covers 95%+ of queries under 10k events, and the dependenc
 
 Deferred because it requires agents to have a polling loop or MCP push support, neither of which is standard today. Session intent (#6) and conflict detection (#7) solve the most urgent case (concurrent edits) without requiring subscriptions.
 
-#### 14. PyPI Publishing
+#### 15. PyPI Publishing
 Package and publish to PyPI so users can `pip install engram` instead of cloning. Requires:
 - Finalize package metadata
 - Set up CI/CD (GitHub Actions)
 - Publish to PyPI with `twine` or `flit`
 
-#### 15. Auto-Update README/CHANGELOG
+#### 16. Auto-Update README/CHANGELOG
 Auto-generate CHANGELOG.md entries from git commits and event history on version bumps. Low priority — manual updates are fine for now.
 
 ---
@@ -201,21 +214,22 @@ Auto-generate CHANGELOG.md entries from git commits and event history on version
 ## Dependencies Between Features
 
 ```
-Session Intent (#6) ──► Multi-Agent Awareness (#10)
+Session Intent (#6) ──► Multi-Agent Awareness (#11)
        │                         │
        ▼                         ▼
 Scope-Aware Briefings (#2) ◄── Conflict Detection (#7)
        │
        ▼
-Smarter Briefing Ranking (#11) ◄── Event Priority (#3)
+Smarter Briefing Ranking (#12) ◄── Event Priority (#3)
                                 ◄── Event Lifecycle (#1)
 
+Context Save/Restore (#8)       ── standalone (benefits from #6)
 Hierarchical Summarization (#4) ── standalone
 Richer Mutation Capture (#5)    ── standalone
-Outcome Tracking (#8)           ── standalone (uses existing related_ids)
-Cross-Project Knowledge (#9)    ── standalone
-Semantic Search (#12)           ── standalone
-Subscriptions (#13)             ── depends on Session Intent (#6)
+Outcome Tracking (#9)           ── standalone (uses existing related_ids)
+Cross-Project Knowledge (#10)   ── standalone
+Semantic Search (#13)           ── standalone
+Subscriptions (#14)             ── depends on Session Intent (#6)
 ```
 
 ## Suggested Build Order
@@ -225,12 +239,13 @@ Based on dependencies and impact:
 1. **Event Lifecycle** (#1) — standalone, immediately improves briefing quality
 2. **Event Priority** (#3) — standalone, small schema change, big briefing improvement
 3. **Scope-Aware Briefings** (#2) — builds on #1 and #3
-4. **Session Intent** (#6) — enables #7, #10, #11
-5. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
-6. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
-7. **Conflict Detection** (#7) — builds on #6
-8. **Outcome Tracking** (#8) — convention + briefing logic, no schema change
-9. **Cross-Project Knowledge** (#9) — standalone but lower urgency
-10. **Multi-Agent Awareness** (#10) — builds on #6
-11. **Smarter Briefing Ranking** (#11) — builds on #1, #2, #3, #6
-12-15. P3 items as needed
+4. **Context Save/Restore** (#8) — standalone, closes the context persistence gap
+5. **Session Intent** (#6) — enables #7, #11, #12
+6. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
+7. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
+8. **Conflict Detection** (#7) — builds on #6
+9. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
+10. **Cross-Project Knowledge** (#10) — standalone but lower urgency
+11. **Multi-Agent Awareness** (#11) — builds on #6
+12. **Smarter Briefing Ranking** (#12) — builds on #1, #2, #3, #6
+13-16. P3 items as needed
