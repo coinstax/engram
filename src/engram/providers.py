@@ -11,13 +11,19 @@ class ModelConfig:
     model_id: str
     env_key: str
     base_url: str | None = None
+    thinking: bool = False
 
 
 MODELS: dict[str, ModelConfig] = {
+    # Standard models
     "gpt-4o": ModelConfig("openai", "gpt-4o", "OPENAI_API_KEY"),
     "gemini-flash": ModelConfig("google", "gemini-2.5-flash", "GOOGLE_API_KEY"),
     "claude-sonnet": ModelConfig("anthropic", "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
     "grok": ModelConfig("openai", "grok-3-latest", "XAI_API_KEY", base_url="https://api.x.ai/v1"),
+    # Thinking models
+    "o3": ModelConfig("openai", "o3", "OPENAI_API_KEY", thinking=True),
+    "claude-opus": ModelConfig("anthropic", "claude-opus-4-20250514", "ANTHROPIC_API_KEY", thinking=True),
+    "gemini-pro": ModelConfig("google", "gemini-2.5-pro", "GOOGLE_API_KEY", thinking=True),
 }
 
 
@@ -58,13 +64,18 @@ def _send_openai(config: ModelConfig, messages: list[dict], system_prompt: str |
 
     api_messages = []
     if system_prompt:
-        api_messages.append({"role": "system", "content": system_prompt})
+        if config.thinking:
+            # o3/reasoning models: use developer message instead of system
+            api_messages.append({"role": "developer", "content": system_prompt})
+        else:
+            api_messages.append({"role": "system", "content": system_prompt})
     api_messages.extend(messages)
 
-    response = client.chat.completions.create(
-        model=config.model_id,
-        messages=api_messages,
-    )
+    create_kwargs: dict = {"model": config.model_id, "messages": api_messages}
+    if config.thinking:
+        create_kwargs["reasoning_effort"] = "high"
+
+    response = client.chat.completions.create(**create_kwargs)
     return response.choices[0].message.content
 
 
@@ -83,9 +94,14 @@ def _send_google(config: ModelConfig, messages: list[dict], system_prompt: str |
             parts=[genai.types.Part(text=msg["content"])],
         ))
 
-    config_kwargs = {}
+    config_kwargs: dict = {}
     if system_prompt:
         config_kwargs["system_instruction"] = system_prompt
+    if config.thinking:
+        config_kwargs["thinking_config"] = genai.types.ThinkingConfig(
+            thinking_budget=10000,
+        )
+        config_kwargs["http_options"] = genai.types.HttpOptions(timeout=300_000)
 
     response = client.models.generate_content(
         model=config.model_id,
@@ -103,11 +119,14 @@ def _send_anthropic(config: ModelConfig, messages: list[dict], system_prompt: st
 
     body: dict = {
         "model": config.model_id,
-        "max_tokens": 4096,
+        "max_tokens": 16384 if config.thinking else 4096,
         "messages": messages,
     }
     if system_prompt:
         body["system"] = system_prompt
+
+    if config.thinking:
+        body["thinking"] = {"type": "enabled", "budget_tokens": 10000}
 
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
@@ -117,11 +136,11 @@ def _send_anthropic(config: ModelConfig, messages: list[dict], system_prompt: st
             "content-type": "application/json",
         },
         json=body,
-        timeout=120.0,
+        timeout=300.0 if config.thinking else 120.0,
     )
     response.raise_for_status()
     data = response.json()
-    # Extract text from content blocks
+    # Extract text from content blocks (skip thinking blocks)
     return "".join(
         block["text"] for block in data["content"]
         if block["type"] == "text"
