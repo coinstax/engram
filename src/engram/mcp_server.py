@@ -45,6 +45,7 @@ def post_event(
     agent_id: str = "claude-code",
     scope: list[str] | None = None,
     related_ids: list[str] | None = None,
+    priority: str = "normal",
 ) -> str:
     """Post an event to the Engram project memory.
 
@@ -61,6 +62,7 @@ def post_event(
         agent_id: Identifier for this agent session
         scope: List of file paths this event relates to
         related_ids: List of related event IDs (for linking outcomes to decisions, etc.)
+        priority: Event priority: critical, high, normal, low (default: normal)
     """
     store = _get_store()
     try:
@@ -74,6 +76,7 @@ def post_event(
             content=content,
             scope=scope,
             related_ids=related_ids,
+            priority=priority,
         )
         result = store.insert(event)
         return format_compact([result])

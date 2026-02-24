@@ -22,11 +22,26 @@ DB_NAME = "events.db"
 CLAUDE_MD_SNIPPET = """
 ## Project Memory (Engram)
 This project uses Engram for persistent memory across agent sessions.
-- Before starting work: `engram briefing`
+
+### Every session
+- **Start of every session**: Call `engram briefing` to understand project context
+- Use `engram briefing --focus src/path` for scope-aware context on a specific area
+
+### Recording events
 - After important decisions: `engram post -t decision -c "rationale..." -s path/to/file`
 - To leave warnings: `engram post -t warning -c "don't do X because..." -s path/to/file`
 - After discovering something: `engram post -t discovery -c "found that..."`
+- Set `--priority critical` or `--priority high` for urgent warnings
+- Include `-s path/to/file` so events appear in focused briefings
+
+### Event lifecycle
+- When an issue is fixed: `engram resolve <id> --reason "Fixed in PR #..."`
+- When a decision is replaced: `engram supersede <id> --by <new-id>`
+- If a resolved issue resurfaces: `engram reopen <id>`
+
+### Searching
 - To search history: `engram query "search terms"`
+- Filter: `engram query -t warning --since 7d -s src/auth`
 """.strip()
 
 

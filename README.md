@@ -153,7 +153,7 @@ Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-
 }
 ```
 
-The MCP server exposes four tools: `post_event`, `query`, `briefing`, `status`.
+The MCP server exposes eight tools: `post_event`, `query`, `briefing`, `status`, `start_consultation`, `consult_say`, `consult_show`, `consult_done`.
 
 ### Add Agent Instructions
 
@@ -162,11 +162,30 @@ Add this to your project's `CLAUDE.md` (or equivalent agent instruction file):
 ```markdown
 ## Project Memory (Engram)
 This project uses Engram for persistent memory across agent sessions.
-- **Start of every session**: Call `engram briefing` via MCP to understand project context
-- After important decisions: `engram post_event` with type "decision" and your rationale
-- To leave warnings for future agents: `engram post_event` with type "warning"
-- After discovering something about the codebase: `engram post_event` with type "discovery"
+
+### Every session
+- **Start of every session**: Call `engram briefing` to understand project context
+- Use `briefing --focus src/path` for scope-aware context on a specific area
+
+### Recording events
+- After important decisions: `post_event` with type "decision" and your rationale
+- To leave warnings for future agents: `post_event` with type "warning"
+- After discovering something about the codebase: `post_event` with type "discovery"
+- Set `priority` to "critical" or "high" for urgent warnings that all agents must see
+- Include `scope` (file paths) so events appear in focused briefings
+
+### Event lifecycle
+- When an issue is fixed: resolve the event with `engram resolve <id> --reason "..."`
+- When a decision is replaced: supersede it with `engram supersede <id> --by <new-id>`
+- If a resolved issue resurfaces: reopen with `engram reopen <id>`
+
+### Searching
 - To search past context: `engram query` with search terms
+- Filter by type, scope, time range, or related event IDs
+
+### Consultations (design validation)
+- Use `start_consultation` to get feedback from external AI models (GPT-4o, Gemini, etc.)
+- Continue with `consult_say`, review with `consult_show`, close with `consult_done`
 ```
 
 ### CLI Usage
