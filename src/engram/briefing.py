@@ -21,16 +21,29 @@ class BriefingGenerator:
     def generate(self, scope: str | None = None,
                  since: str | None = None,
                  focus: str | None = None,
-                 resolved_window_hours: int = 48) -> BriefingResult:
-        """Generate a 4-section briefing.
+                 resolved_window_hours: int = 48,
+                 agent_id: str | None = None) -> BriefingResult:
+        """Generate a 4-section briefing with active sessions.
 
         Sections:
+        0. Active Sessions — currently active agent sessions
         1. Critical Warnings — critical priority + global (unscoped) warnings
         2. Focus-Relevant — events matching focus path (if provided)
         3. Other Active — remaining active events
         4. Recently Resolved — resolved events within resolved_window_hours
+
+        If focus is not provided, auto-detects from active session scope.
         """
         since_iso = parse_since(since) if since else self._default_since()
+
+        # Fetch active sessions
+        active_sessions = self.store.list_sessions(active_only=True)
+
+        # Auto-focus from active session if not provided
+        if not focus and agent_id:
+            active_sess = self.store.get_active_session(agent_id)
+            if active_sess and active_sess.scope:
+                focus = active_sess.scope[0]
 
         # Fetch active events by type
         warnings = self.store.recent_by_type(
@@ -100,6 +113,7 @@ class BriefingGenerator:
             generated_at=datetime.now(timezone.utc).isoformat(),
             total_events=total,
             time_range=time_range,
+            active_sessions=active_sessions,
             critical_warnings=critical_warnings,
             focus_relevant=focus_relevant,
             other_active=other_active,

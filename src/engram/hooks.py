@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from engram.models import Event, EventType
+from engram.models import Event, EventType, Session
 from engram.store import EventStore
 from engram.briefing import BriefingGenerator
 from engram.formatting import format_briefing_compact
@@ -156,12 +156,20 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     if len(content) > 2000:
         content = content[:2000]
 
+    # Auto-tag with active session
+    agent_id = f"hook-{session_id[:8]}"
+    active_session = store.get_active_session(agent_id)
+    if not active_session:
+        # Try the base agent ID pattern too
+        active_session = store.get_active_session("claude-code")
+
     event = Event(
         id="", timestamp="",
         event_type=EventType.MUTATION,
-        agent_id=f"hook-{session_id[:8]}",
+        agent_id=agent_id,
         content=content,
         scope=[rel_path],
+        session_id=active_session.id if active_session else None,
     )
     store.insert(event)
 
@@ -186,22 +194,47 @@ def _handle_bash_outcome(tool_input: dict, stdin_data: dict,
     if len(content) > 2000:
         content = content[:2000]
 
+    # Auto-tag with active session
+    agent_id = f"hook-{session_id[:8]}"
+    active_session = store.get_active_session(agent_id)
+    if not active_session:
+        active_session = store.get_active_session("claude-code")
+
     event = Event(
         id="", timestamp="",
         event_type=EventType.OUTCOME,
-        agent_id=f"hook-{session_id[:8]}",
+        agent_id=agent_id,
         content=content,
+        session_id=active_session.id if active_session else None,
     )
     store.insert(event)
 
 
 def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
-    """Handle SessionStart hook. Returns briefing text for context injection."""
+    """Handle SessionStart hook. Auto-registers session, returns briefing."""
     store = _get_store(project_dir)
     if not store:
         return ""
 
     try:
+        agent_id = "claude-code"
+
+        # Stale cleanup
+        store.cleanup_stale_sessions()
+
+        # Auto-end previous active session for this agent
+        active = store.get_active_session(agent_id)
+        if active:
+            store.end_session(active.id)
+
+        # Auto-register new session
+        project_name = store.get_meta("project_name") or project_dir.name
+        sess = Session(
+            id="", agent_id=agent_id,
+            focus=f"Working on {project_name}",
+        )
+        store.insert_session(sess)
+
         gen = BriefingGenerator(store)
         result = gen.generate()
         return format_briefing_compact(result)

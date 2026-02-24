@@ -3,7 +3,7 @@
 import json
 from dataclasses import asdict
 
-from engram.models import BriefingResult, Event
+from engram.models import BriefingResult, Event, Session
 
 
 def _short_timestamp(ts: str) -> str:
@@ -47,6 +47,51 @@ def format_json(events: list[Event]) -> str:
     return json.dumps(data, indent=2)
 
 
+def _relative_time(iso_ts: str) -> str:
+    """Convert ISO timestamp to relative time like '2h ago', '30m ago'."""
+    from datetime import datetime, timezone
+    try:
+        # Handle both +00:00 and Z suffixes
+        ts = iso_ts.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts)
+        delta = datetime.now(timezone.utc) - dt
+        seconds = int(delta.total_seconds())
+        if seconds < 60:
+            return "just now"
+        if seconds < 3600:
+            return f"{seconds // 60}m ago"
+        if seconds < 86400:
+            return f"{seconds // 3600}h ago"
+        return f"{seconds // 86400}d ago"
+    except (ValueError, TypeError):
+        return iso_ts[:16]
+
+
+def format_session_compact(session: Session) -> str:
+    """Single-line compact format for a session."""
+    scope_part = f" ({_scope_str(session.scope)})" if session.scope else ""
+    time_part = _relative_time(session.started_at)
+    status = "active" if session.ended_at is None else "ended"
+    desc = f' — {session.description}' if session.description else ""
+    return f'[{session.id}] {session.agent_id}: "{session.focus}"{scope_part} — {status}, started {time_part}{desc}'
+
+
+def format_sessions_compact(sessions: list[Session]) -> str:
+    """Compact multi-line output for a list of sessions."""
+    if not sessions:
+        return "(no sessions)"
+    return "\n".join(format_session_compact(s) for s in sessions)
+
+
+def format_sessions_json(sessions: list[Session]) -> str:
+    """JSON output for sessions."""
+    data = []
+    for s in sessions:
+        d = asdict(s)
+        data.append(d)
+    return json.dumps(data, indent=2)
+
+
 def format_briefing_compact(briefing: BriefingResult) -> str:
     """Token-efficient briefing for LLM context. 4-section structure."""
     lines = [
@@ -54,6 +99,12 @@ def format_briefing_compact(briefing: BriefingResult) -> str:
         f"# {briefing.total_events} events | {briefing.time_range}",
         "",
     ]
+
+    if briefing.active_sessions:
+        lines.append(f"## Active Sessions ({len(briefing.active_sessions)})")
+        for s in briefing.active_sessions:
+            lines.append(format_session_compact(s))
+        lines.append("")
 
     if briefing.potentially_stale:
         lines.append(f"## Possibly Stale ({len(briefing.potentially_stale)})")

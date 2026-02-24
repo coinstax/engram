@@ -385,6 +385,143 @@ def reopen(ctx, event_id):
         store.close()
 
 
+# --- Session commands ---
+
+@cli.group()
+@click.pass_context
+def session(ctx):
+    """Manage agent sessions for intent tracking."""
+    pass
+
+
+@session.command("start")
+@click.option("--focus", "-f", required=True, help="What you're working on (free text)")
+@click.option("--scope", "-s", multiple=True, help="File path(s) for this session")
+@click.option("--agent", "-a", default=None, help="Agent identifier")
+@click.option("--description", "-d", default=None, help="Longer description of intent")
+@click.option("--format", "fmt", default="compact", type=click.Choice(["compact", "json"]))
+@click.pass_context
+def session_start(ctx, focus, scope, agent, description, fmt):
+    """Start a new session. Auto-ends any active session for this agent."""
+    from engram.models import Session
+    from engram.formatting import format_session_compact, format_sessions_json
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
+    scope_list = list(scope) if scope else None
+
+    try:
+        # Stale cleanup
+        store.cleanup_stale_sessions()
+
+        # Auto-end previous active session
+        active = store.get_active_session(agent_id)
+        if active:
+            store.end_session(active.id)
+            click.echo(f"Ended previous session: {active.id}")
+
+        sess = Session(
+            id="", agent_id=agent_id, focus=focus,
+            scope=scope_list, description=description,
+        )
+        result = store.insert_session(sess)
+
+        if fmt == "json":
+            click.echo(format_sessions_json([result]))
+        else:
+            click.echo(format_session_compact(result))
+    finally:
+        store.close()
+
+
+@session.command("end")
+@click.argument("session_id", required=False)
+@click.option("--agent", "-a", default=None, help="Agent identifier (to find active session)")
+@click.pass_context
+def session_end(ctx, session_id, agent):
+    """End a session. Defaults to the most recent active session for the agent."""
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
+
+    try:
+        store.cleanup_stale_sessions()
+
+        if not session_id:
+            active = store.get_active_session(agent_id)
+            if not active:
+                click.echo(f"No active session for agent '{agent_id}'.", err=True)
+                sys.exit(1)
+            session_id = active.id
+
+        ended = store.end_session(session_id)
+        click.echo(f"Ended: {ended.id} ({ended.focus})")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@session.command("ls")
+@click.option("--all", "show_all", is_flag=True, help="Include ended sessions")
+@click.option("--format", "-f", "fmt", default="compact", type=click.Choice(["compact", "json"]))
+@click.pass_context
+def session_ls(ctx, show_all, fmt):
+    """List sessions. Active only by default."""
+    from engram.formatting import format_sessions_compact, format_sessions_json
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    try:
+        store.cleanup_stale_sessions()
+        sessions = store.list_sessions(active_only=not show_all)
+
+        if fmt == "json":
+            click.echo(format_sessions_json(sessions))
+        else:
+            click.echo(format_sessions_compact(sessions))
+    finally:
+        store.close()
+
+
+@session.command("show")
+@click.argument("session_id", required=False)
+@click.option("--agent", "-a", default=None, help="Agent identifier")
+@click.option("--format", "-f", "fmt", default="compact", type=click.Choice(["compact", "json"]))
+@click.pass_context
+def session_show(ctx, session_id, agent, fmt):
+    """Show details of a session. Defaults to the current active session."""
+    from engram.formatting import format_session_compact, format_sessions_json
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
+
+    try:
+        store.cleanup_stale_sessions()
+
+        if not session_id:
+            sess = store.get_active_session(agent_id)
+            if not sess:
+                click.echo(f"No active session for agent '{agent_id}'.", err=True)
+                sys.exit(1)
+        else:
+            sess = store.get_session(session_id)
+            if not sess:
+                click.echo(f"Session not found: {session_id}", err=True)
+                sys.exit(1)
+
+        if fmt == "json":
+            click.echo(format_sessions_json([sess]))
+        else:
+            click.echo(format_session_compact(sess))
+    finally:
+        store.close()
+
+
 # --- Consultation commands ---
 
 @cli.group()

@@ -46,6 +46,7 @@ def post_event(
     scope: list[str] | None = None,
     related_ids: list[str] | None = None,
     priority: str = "normal",
+    session_id: str | None = None,
 ) -> str:
     """Post an event to the Engram project memory.
 
@@ -63,11 +64,18 @@ def post_event(
         scope: List of file paths this event relates to
         related_ids: List of related event IDs (for linking outcomes to decisions, etc.)
         priority: Event priority: critical, high, normal, low (default: normal)
+        session_id: Link event to a session (defaults to active session for agent if not provided)
     """
     store = _get_store()
     try:
         if len(content) > 2000:
             content = content[:2000]
+
+        # Auto-link to active session if not specified
+        if session_id is None:
+            active = store.get_active_session(agent_id)
+            if active:
+                session_id = active.id
 
         event = Event(
             id="", timestamp="",
@@ -77,6 +85,7 @@ def post_event(
             scope=scope,
             related_ids=related_ids,
             priority=priority,
+            session_id=session_id,
         )
         result = store.insert(event)
         return format_compact([result])
@@ -166,6 +175,91 @@ def status() -> str:
             "initialized_at": store.get_meta("initialized_at") or "unknown",
             "db_size_bytes": db_path.stat().st_size,
         }, indent=2)
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def session_start(
+    focus: str,
+    scope: list[str] | None = None,
+    agent_id: str = "claude-code",
+    description: str | None = None,
+) -> str:
+    """Start a new agent session declaring intent and focus area.
+
+    Auto-ends any active session for this agent (single-session-per-agent).
+    Sessions enable auto-scoped briefings and event tagging.
+
+    Args:
+        focus: What you're working on (free text, e.g. "refactoring auth module")
+        scope: File paths this session focuses on (e.g. ["src/auth/"])
+        agent_id: Identifier for this agent
+        description: Optional longer description of session intent
+    """
+    from engram.models import Session
+    from engram.formatting import format_session_compact
+    store = _get_store()
+    try:
+        store.cleanup_stale_sessions()
+
+        # Auto-end previous active session
+        active = store.get_active_session(agent_id)
+        if active:
+            store.end_session(active.id)
+
+        sess = Session(
+            id="", agent_id=agent_id, focus=focus,
+            scope=scope, description=description,
+        )
+        result = store.insert_session(sess)
+        return format_session_compact(result)
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def session_end(
+    session_id: str | None = None,
+    agent_id: str = "claude-code",
+) -> str:
+    """End an active agent session.
+
+    Args:
+        session_id: Specific session to end. If not provided, ends the active session for agent_id.
+        agent_id: Agent whose active session to end (used when session_id not provided)
+    """
+    store = _get_store()
+    try:
+        store.cleanup_stale_sessions()
+
+        if not session_id:
+            active = store.get_active_session(agent_id)
+            if not active:
+                return f"No active session for agent '{agent_id}'."
+            session_id = active.id
+
+        ended = store.end_session(session_id)
+        return f"Ended: {ended.id} ({ended.focus})"
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def list_sessions(
+    active_only: bool = True,
+) -> str:
+    """List agent sessions.
+
+    Args:
+        active_only: If true (default), show only active sessions. False shows all.
+    """
+    from engram.formatting import format_sessions_compact
+    store = _get_store()
+    try:
+        store.cleanup_stale_sessions()
+        sessions = store.list_sessions(active_only=active_only)
+        return format_sessions_compact(sessions)
     finally:
         store.close()
 
