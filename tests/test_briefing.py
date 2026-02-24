@@ -15,11 +15,14 @@ class TestBriefingGenerator:
 
         assert briefing.project_name == "test-project"
         assert briefing.total_events == 8
-        assert len(briefing.active_warnings) == 2
-        assert len(briefing.recent_decisions) == 1
+        # All warnings should appear (2 in seeded_store, both have scope so they go to other_active)
+        # Warnings with no scope go to critical, scoped warnings go to other_active
+        total_warnings = sum(
+            1 for e in briefing.critical_warnings + briefing.other_active
+            if e.event_type == EventType.WARNING
+        )
+        assert total_warnings == 2
         assert len(briefing.recent_mutations) == 2
-        assert len(briefing.recent_discoveries) == 2
-        assert len(briefing.recent_outcomes) == 1
 
     def test_generate_with_scope(self, seeded_store):
         seeded_store.set_meta("project_name", "test-project")
@@ -36,7 +39,6 @@ class TestBriefingGenerator:
         output = format_briefing_compact(briefing)
 
         assert "# Engram Briefing — test-project" in output
-        assert "## Warnings (2)" in output
         assert "Don't modify user_sessions" in output
 
     def test_generate_json_output(self, seeded_store):
@@ -48,7 +50,6 @@ class TestBriefingGenerator:
 
         assert data["project_name"] == "test-project"
         assert data["total_events"] == 8
-        assert len(data["active_warnings"]) == 2
 
     def test_generate_empty_store(self, store):
         store.set_meta("project_name", "empty-project")
@@ -56,7 +57,8 @@ class TestBriefingGenerator:
         briefing = gen.generate()
 
         assert briefing.total_events == 0
-        assert len(briefing.active_warnings) == 0
+        assert len(briefing.critical_warnings) == 0
+        assert len(briefing.other_active) == 0
         assert len(briefing.recent_mutations) == 0
 
     def test_staleness_detection(self, store):
@@ -210,3 +212,162 @@ class TestBriefingGenerator:
         output = format_briefing_compact(briefing)
         assert "POSSIBLY STALE" in output
         assert "bcrypt" in output
+
+
+class TestFocusBriefing:
+    """Tests for scope-aware briefing with --focus."""
+
+    def test_focus_moves_matching_events(self, store):
+        """Events matching focus path should appear in focus_relevant."""
+        store.set_meta("project_name", "focus-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="Auth warning", scope=["src/auth/login.py"]),
+            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+                  event_type=EventType.DECISION, agent_id="a",
+                  content="DB decision", scope=["src/db/pool.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate(focus="src/auth")
+
+        focus_content = [e.content for e in briefing.focus_relevant]
+        other_content = [e.content for e in briefing.other_active]
+        assert "Auth warning" in focus_content
+        assert "DB decision" in other_content
+
+    def test_critical_warnings_bypass_focus(self, store):
+        """Critical warnings always go to critical_warnings, not focus_relevant."""
+        store.set_meta("project_name", "critical-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="Critical auth issue", scope=["src/auth/login.py"],
+                  priority="critical"),
+            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="Normal auth warning", scope=["src/auth/login.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate(focus="src/auth")
+
+        critical_content = [e.content for e in briefing.critical_warnings]
+        focus_content = [e.content for e in briefing.focus_relevant]
+        assert "Critical auth issue" in critical_content
+        assert "Normal auth warning" in focus_content
+
+    def test_global_warnings_in_critical(self, store):
+        """Warnings with no scope go to critical_warnings."""
+        store.set_meta("project_name", "global-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="Global warning"),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+
+        critical_content = [e.content for e in briefing.critical_warnings]
+        assert "Global warning" in critical_content
+
+    def test_no_focus_everything_in_other_active(self, store):
+        """Without --focus, no events go to focus_relevant."""
+        store.set_meta("project_name", "nofocus-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.DECISION, agent_id="a",
+                  content="Some decision", scope=["src/foo.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()  # no focus
+
+        assert len(briefing.focus_relevant) == 0
+        assert len(briefing.other_active) == 1
+
+
+class TestPriorityBriefing:
+    """Tests for priority sorting in briefings."""
+
+    def test_priority_sorting(self, store):
+        """Higher priority events should appear first within a section."""
+        store.set_meta("project_name", "priority-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.DECISION, agent_id="a",
+                  content="Low priority", scope=["src/foo.py"],
+                  priority="low"),
+            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+                  event_type=EventType.DECISION, agent_id="a",
+                  content="High priority", scope=["src/foo.py"],
+                  priority="high"),
+            Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+                  event_type=EventType.DECISION, agent_id="a",
+                  content="Normal priority", scope=["src/foo.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+
+        contents = [e.content for e in briefing.other_active
+                     if e.event_type == EventType.DECISION]
+        assert contents[0] == "High priority"
+
+    def test_priority_in_compact_output(self, store):
+        """Priority tag should appear in compact output for non-normal events."""
+        store.set_meta("project_name", "prio-output")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="Critical issue", priority="critical"),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+        output = format_briefing_compact(briefing)
+        assert "[CRITICAL]" in output
+
+
+class TestResolvedWindow:
+    """Tests for recently resolved events in briefings."""
+
+    def test_resolved_events_appear_in_recently_resolved(self, store):
+        """Resolved events within window should appear in recently_resolved."""
+        store.set_meta("project_name", "resolved-test")
+        event = Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                      event_type=EventType.WARNING, agent_id="a",
+                      content="Fixed issue")
+        result = store.insert(event)
+        store.update_status(result.id, "resolved", resolved_reason="Fixed in PR #42")
+
+        gen = BriefingGenerator(store)
+        # Use a very large window to ensure our event is included
+        briefing = gen.generate(resolved_window_hours=9999)
+
+        resolved_content = [e.content for e in briefing.recently_resolved]
+        assert "Fixed issue" in resolved_content
+
+    def test_resolved_events_not_in_active_sections(self, store):
+        """Resolved events should not appear in critical/focus/other sections."""
+        store.set_meta("project_name", "resolved-test-2")
+        event = Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                      event_type=EventType.WARNING, agent_id="a",
+                      content="Resolved warning")
+        result = store.insert(event)
+        store.update_status(result.id, "resolved", resolved_reason="Done")
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate(resolved_window_hours=9999)
+
+        all_active = briefing.critical_warnings + briefing.focus_relevant + briefing.other_active
+        active_content = [e.content for e in all_active]
+        assert "Resolved warning" not in active_content

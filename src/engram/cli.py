@@ -124,10 +124,13 @@ def init(ctx, max_commits):
 @click.option("--scope", "-s", multiple=True, help="File path(s)")
 @click.option("--agent", "-a", default=None, help="Agent identifier")
 @click.option("--related", "-r", multiple=True, help="Related event ID(s)")
+@click.option("--priority", "-p", default="normal",
+              type=click.Choice(["critical", "high", "normal", "low"]),
+              help="Event priority (default: normal)")
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def post(ctx, event_type, content, scope, agent, related, fmt):
+def post(ctx, event_type, content, scope, agent, related, priority, fmt):
     """Post an event to the store."""
     project = ctx.obj["project"]
     store = _get_store(project)
@@ -147,6 +150,7 @@ def post(ctx, event_type, content, scope, agent, related, fmt):
         content=content,
         scope=scope_list,
         related_ids=related_list,
+        priority=priority,
     )
     result = store.insert(event)
 
@@ -192,16 +196,20 @@ def query(ctx, text, event_type, scope, since, agent, related_to, limit, fmt):
 @cli.command()
 @click.option("--scope", "-s", default=None, help="Scope path prefix")
 @click.option("--since", default=None, help="Time filter: 24h, 7d, or ISO date")
+@click.option("--focus", default=None, help="Focus path for scope-aware ranking")
+@click.option("--resolved-window", default=48, type=int,
+              help="Hours to show recently resolved events (default: 48)")
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def briefing(ctx, scope, since, fmt):
+def briefing(ctx, scope, since, focus, resolved_window, fmt):
     """Generate a project briefing."""
     project = ctx.obj["project"]
     store = _get_store(project)
 
     gen = BriefingGenerator(store)
-    result = gen.generate(scope=scope, since=since)
+    result = gen.generate(scope=scope, since=since, focus=focus,
+                          resolved_window_hours=resolved_window)
 
     if fmt == "json":
         click.echo(format_briefing_json(result))
@@ -270,6 +278,96 @@ def gc(ctx, max_age, dry_run):
         click.echo(f"Archived {result['archived']} events to {result['archive_path']}.")
 
     store.close()
+
+
+# --- Event lifecycle commands ---
+
+@cli.command()
+@click.argument("event_id")
+@click.option("--reason", "-r", required=True, help="Why this event is resolved")
+@click.pass_context
+def resolve(ctx, event_id, reason):
+    """Resolve an active event (e.g., a warning that's been addressed)."""
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    try:
+        event = store.get_event(event_id)
+        if not event:
+            click.echo(f"Error: Event not found: {event_id}", err=True)
+            sys.exit(1)
+        if event.status != "active":
+            click.echo(f"Error: Event {event_id} is {event.status}, not active.", err=True)
+            sys.exit(1)
+
+        updated = store.update_status(event_id, "resolved", resolved_reason=reason)
+        click.echo(f"Resolved: {event_id}")
+        click.echo(f"Reason: {reason}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@cli.command()
+@click.argument("event_id")
+@click.option("--by", "new_event_id", required=True, help="ID of the superseding event")
+@click.pass_context
+def supersede(ctx, event_id, new_event_id):
+    """Mark an event as superseded by a newer event."""
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    try:
+        old = store.get_event(event_id)
+        if not old:
+            click.echo(f"Error: Event not found: {event_id}", err=True)
+            sys.exit(1)
+        new = store.get_event(new_event_id)
+        if not new:
+            click.echo(f"Error: Superseding event not found: {new_event_id}", err=True)
+            sys.exit(1)
+        if old.status != "active":
+            click.echo(f"Error: Event {event_id} is {old.status}, not active.", err=True)
+            sys.exit(1)
+
+        store.update_status(event_id, "superseded", superseded_by=new_event_id)
+        click.echo(f"Superseded: {event_id} -> {new_event_id}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+@cli.command()
+@click.argument("event_id")
+@click.pass_context
+def reopen(ctx, event_id):
+    """Reopen a resolved event (set back to active). Superseded events cannot be reopened."""
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    try:
+        event = store.get_event(event_id)
+        if not event:
+            click.echo(f"Error: Event not found: {event_id}", err=True)
+            sys.exit(1)
+        if event.status == "superseded":
+            click.echo(f"Error: Superseded events cannot be reopened. Event {event_id} was superseded by {event.superseded_by}.", err=True)
+            sys.exit(1)
+        if event.status == "active":
+            click.echo(f"Event {event_id} is already active.", err=True)
+            sys.exit(1)
+
+        store.update_status(event_id, "active")
+        click.echo(f"Reopened: {event_id}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
 
 
 # --- Consultation commands ---

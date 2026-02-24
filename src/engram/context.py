@@ -55,17 +55,27 @@ class ContextAssembler:
         gen = BriefingGenerator(self.store)
         briefing = gen.generate(scope=scope, since=since)
 
-        if briefing.active_warnings:
-            lines = [format_event_compact(e) for e in briefing.active_warnings[:5]]
-            sections.append(f"\n## Active Warnings ({len(briefing.active_warnings)})\n" + "\n".join(lines))
+        if briefing.critical_warnings:
+            lines = [format_event_compact(e) for e in briefing.critical_warnings[:5]]
+            sections.append(f"\n## Critical Warnings ({len(briefing.critical_warnings)})\n" + "\n".join(lines))
 
-        if briefing.recent_decisions:
-            lines = [format_event_compact(e) for e in briefing.recent_decisions[:7]]
-            sections.append(f"\n## Recent Decisions ({len(briefing.recent_decisions)})\n" + "\n".join(lines))
+        # Combine other_active for categorized context
+        active_events = briefing.other_active + briefing.focus_relevant
+        warnings = [e for e in active_events if e.event_type.value == "warning"]
+        decisions = [e for e in active_events if e.event_type.value == "decision"]
+        discoveries = [e for e in active_events if e.event_type.value == "discovery"]
 
-        if briefing.recent_discoveries:
-            lines = [format_event_compact(e) for e in briefing.recent_discoveries[:5]]
-            sections.append(f"\n## Recent Discoveries ({len(briefing.recent_discoveries)})\n" + "\n".join(lines))
+        if warnings:
+            lines = [format_event_compact(e) for e in warnings[:5]]
+            sections.append(f"\n## Active Warnings ({len(warnings)})\n" + "\n".join(lines))
+
+        if decisions:
+            lines = [format_event_compact(e) for e in decisions[:7]]
+            sections.append(f"\n## Recent Decisions ({len(decisions)})\n" + "\n".join(lines))
+
+        if discoveries:
+            lines = [format_event_compact(e) for e in discoveries[:5]]
+            sections.append(f"\n## Recent Discoveries ({len(discoveries)})\n" + "\n".join(lines))
 
         if briefing.potentially_stale:
             lines = [format_event_compact(e) for e in briefing.potentially_stale[:3]]
@@ -112,12 +122,23 @@ class ContextAssembler:
         parts = []
         if readme_exists:
             parts.append("README")
-        if briefing.active_warnings:
-            parts.append(f"{len(briefing.active_warnings)} warnings")
-        if briefing.recent_decisions:
-            parts.append(f"{len(briefing.recent_decisions)} decisions")
-        if briefing.recent_discoveries:
-            parts.append(f"{len(briefing.recent_discoveries)} discoveries")
+        all_warnings = briefing.critical_warnings + [
+            e for e in briefing.other_active if e.event_type.value == "warning"
+        ]
+        all_decisions = [
+            e for e in briefing.other_active + briefing.focus_relevant
+            if e.event_type.value == "decision"
+        ]
+        all_discoveries = [
+            e for e in briefing.other_active + briefing.focus_relevant
+            if e.event_type.value == "discovery"
+        ]
+        if all_warnings:
+            parts.append(f"{len(all_warnings)} warnings")
+        if all_decisions:
+            parts.append(f"{len(all_decisions)} decisions")
+        if all_discoveries:
+            parts.append(f"{len(all_discoveries)} discoveries")
 
         return ", ".join(parts) if parts else "minimal (no events or README)"
 

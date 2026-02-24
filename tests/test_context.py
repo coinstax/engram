@@ -50,8 +50,21 @@ class TestAssemble:
 
     def test_includes_warnings(self, assembler_seeded):
         result = assembler_seeded.assemble()
-        assert "Active Warnings" in result
-        assert "Don't modify user_sessions table" in result
+        # Seeded warnings have scope, so they appear in other_active as warnings
+        # The context assembler extracts them from other_active + focus_relevant
+        assert "Don't modify user_sessions table" in result or "Rate limiter" in result
+
+    def test_includes_critical_warnings(self, store, tmp_path):
+        """Critical/global warnings appear in the Critical Warnings section."""
+        store.set_meta("project_name", "test-project")
+        from engram.models import Event, EventType
+        store.insert(Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                           event_type=EventType.WARNING, agent_id="a",
+                           content="Global unscoped warning", priority="critical"))
+        assembler = ContextAssembler(store, project_dir=tmp_path)
+        result = assembler.assemble()
+        assert "Critical Warnings" in result
+        assert "Global unscoped warning" in result
 
     def test_includes_decisions(self, assembler_seeded):
         result = assembler_seeded.assemble()

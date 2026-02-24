@@ -143,20 +143,21 @@ class TestFormatting:
         assert "event_type" in data[0]
 
     def test_format_briefing_compact(self, seeded_store):
+        warnings = seeded_store.recent_by_type(EventType.WARNING)
+        decisions = seeded_store.recent_by_type(EventType.DECISION)
+        mutations = seeded_store.recent_by_type(EventType.MUTATION)
         briefing = BriefingResult(
             project_name="test-project",
             generated_at="2026-02-23T14:30:00+00:00",
             total_events=8,
             time_range="2026-02-23",
-            active_warnings=seeded_store.recent_by_type(EventType.WARNING),
-            recent_decisions=seeded_store.recent_by_type(EventType.DECISION),
-            recent_mutations=seeded_store.recent_by_type(EventType.MUTATION),
-            recent_discoveries=seeded_store.recent_by_type(EventType.DISCOVERY),
-            recent_outcomes=seeded_store.recent_by_type(EventType.OUTCOME),
+            critical_warnings=warnings,
+            other_active=decisions,
+            recent_mutations=mutations,
         )
         output = format_briefing_compact(briefing)
         assert "# Engram Briefing" in output
-        assert "## Warnings (2)" in output
+        assert "## Critical Warnings (2)" in output
         assert "## Recent Changes (2)" in output
 
     def test_format_event_compact_with_related_ids(self):
@@ -197,11 +198,6 @@ class TestFormatting:
             generated_at="2026-02-23T14:30:00+00:00",
             total_events=8,
             time_range="2026-02-23",
-            active_warnings=[],
-            recent_decisions=[],
-            recent_mutations=[],
-            recent_discoveries=[],
-            recent_outcomes=[],
         )
         result = format_briefing_json(briefing)
         data = json.loads(result)

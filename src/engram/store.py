@@ -8,7 +8,7 @@ from pathlib import Path
 
 from engram.models import Event, EventType, QueryFilter
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS events (
@@ -20,12 +20,19 @@ CREATE TABLE IF NOT EXISTS events (
     content     TEXT NOT NULL
                 CHECK(length(content) <= 2000),
     scope       TEXT,
-    related_ids TEXT
+    related_ids TEXT,
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active','resolved','superseded')),
+    priority    TEXT NOT NULL DEFAULT 'normal'
+                CHECK(priority IN ('critical','high','normal','low')),
+    resolved_reason TEXT,
+    superseded_by_event_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_type      ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_agent     ON events(agent_id);
+CREATE INDEX IF NOT EXISTS idx_events_status    ON events(status);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
     content,
@@ -153,6 +160,34 @@ class EventStore:
             """)
             self.set_meta("schema_version", "3")
 
+        if version < 4:
+            # Add event lifecycle and priority columns
+            columns = {
+                row[1] for row in
+                self._conn.execute("PRAGMA table_info(events)").fetchall()
+            }
+            if "status" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+                )
+            if "priority" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal'"
+                )
+            if "resolved_reason" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN resolved_reason TEXT"
+                )
+            if "superseded_by_event_id" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN superseded_by_event_id TEXT"
+                )
+            # Add index for status-based queries (briefing filters)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)"
+            )
+            self.set_meta("schema_version", "4")
+
     @staticmethod
     def _generate_id() -> str:
         return f"evt-{uuid.uuid4().hex[:12]}"
@@ -164,12 +199,28 @@ class EventStore:
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         scope_raw = row["scope"]
         scope = json.loads(scope_raw) if scope_raw else None
-        # Handle both v1.0 (no related_ids column) and v1.1 databases
+        # Handle older schema versions gracefully
         try:
             related_raw = row["related_ids"]
             related = json.loads(related_raw) if related_raw else None
         except (IndexError, KeyError):
             related = None
+        try:
+            status = row["status"]
+        except (IndexError, KeyError):
+            status = "active"
+        try:
+            priority = row["priority"]
+        except (IndexError, KeyError):
+            priority = "normal"
+        try:
+            resolved_reason = row["resolved_reason"]
+        except (IndexError, KeyError):
+            resolved_reason = None
+        try:
+            superseded_by = row["superseded_by_event_id"]
+        except (IndexError, KeyError):
+            superseded_by = None
         return Event(
             id=row["id"],
             timestamp=row["timestamp"],
@@ -178,6 +229,10 @@ class EventStore:
             content=row["content"],
             scope=scope,
             related_ids=related,
+            status=status,
+            priority=priority,
+            resolved_reason=resolved_reason,
+            superseded_by=superseded_by,
         )
 
     def insert(self, event: Event) -> Event:
@@ -192,10 +247,11 @@ class EventStore:
 
         with self.conn:
             self.conn.execute(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (event.id, event.timestamp, event.event_type.value,
-                 event.agent_id, event.content, scope_json, related_json),
+                 event.agent_id, event.content, scope_json, related_json,
+                 event.status, event.priority),
             )
         return event
 
@@ -210,12 +266,13 @@ class EventStore:
             scope_json = json.dumps(e.scope) if e.scope else None
             related_json = json.dumps(e.related_ids) if e.related_ids else None
             rows.append((e.id, e.timestamp, e.event_type.value,
-                         e.agent_id, e.content, scope_json, related_json))
+                         e.agent_id, e.content, scope_json, related_json,
+                         e.status, e.priority))
 
         with self.conn:
             self.conn.executemany(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
@@ -278,10 +335,15 @@ class EventStore:
         return [self._row_to_event(r) for r in rows]
 
     def recent_by_type(self, event_type: EventType, limit: int = 10,
-                       since: str | None = None, scope: str | None = None) -> list[Event]:
-        """Fetch recent events of a specific type."""
+                       since: str | None = None, scope: str | None = None,
+                       status: str | None = "active") -> list[Event]:
+        """Fetch recent events of a specific type. Defaults to active only."""
         conditions = ["event_type = ?"]
         params: list = [event_type.value]
+
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
 
         if since:
             conditions.append("timestamp >= ?")
@@ -297,6 +359,47 @@ class EventStore:
 
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_event(r) for r in rows]
+
+    def recent_resolved(self, since: str, limit: int = 10) -> list[Event]:
+        """Fetch recently resolved events within a time window."""
+        sql = (
+            "SELECT * FROM events WHERE status = 'resolved' AND timestamp >= ? "
+            "ORDER BY timestamp DESC LIMIT ?"
+        )
+        rows = self.conn.execute(sql, (since, limit)).fetchall()
+        return [self._row_to_event(r) for r in rows]
+
+    def update_status(self, event_id: str, status: str,
+                      resolved_reason: str | None = None,
+                      superseded_by: str | None = None) -> Event:
+        """Update an event's lifecycle status."""
+        if status not in ("active", "resolved", "superseded"):
+            raise ValueError(f"Invalid status: {status}. Must be active/resolved/superseded.")
+
+        row = self.conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Event not found: {event_id}")
+
+        with self.conn:
+            self.conn.execute(
+                "UPDATE events SET status = ?, resolved_reason = ?, superseded_by_event_id = ? "
+                "WHERE id = ?",
+                (status, resolved_reason, superseded_by, event_id),
+            )
+
+        updated = self.conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        return self._row_to_event(updated)
+
+    def get_event(self, event_id: str) -> Event | None:
+        """Fetch a single event by ID."""
+        row = self.conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        return self._row_to_event(row) if row else None
 
     def query_related(self, event_id: str, limit: int = 50) -> list[Event]:
         """Find all events that reference the given event_id in their related_ids."""

@@ -8,6 +8,10 @@ from engram.query import parse_since
 from engram.store import EventStore
 
 
+# Priority sort order (lower = more important)
+_PRIORITY_ORDER = {"critical": 0, "high": 1, "normal": 2, "low": 3}
+
+
 class BriefingGenerator:
     """Generates project briefings from the event store."""
 
@@ -15,24 +19,73 @@ class BriefingGenerator:
         self.store = store
 
     def generate(self, scope: str | None = None,
-                 since: str | None = None) -> BriefingResult:
-        """Generate a briefing. Defaults to last 7 days."""
+                 since: str | None = None,
+                 focus: str | None = None,
+                 resolved_window_hours: int = 48) -> BriefingResult:
+        """Generate a 4-section briefing.
+
+        Sections:
+        1. Critical Warnings — critical priority + global (unscoped) warnings
+        2. Focus-Relevant — events matching focus path (if provided)
+        3. Other Active — remaining active events
+        4. Recently Resolved — resolved events within resolved_window_hours
+        """
         since_iso = parse_since(since) if since else self._default_since()
 
+        # Fetch active events by type
         warnings = self.store.recent_by_type(
-            EventType.WARNING, limit=10, since=since_iso, scope=scope)
+            EventType.WARNING, limit=20, since=since_iso, scope=scope, status="active")
         decisions = self.store.recent_by_type(
-            EventType.DECISION, limit=10, since=since_iso, scope=scope)
+            EventType.DECISION, limit=15, since=since_iso, scope=scope, status="active")
         mutations = self.store.recent_by_type(
-            EventType.MUTATION, limit=20, since=since_iso, scope=scope)
+            EventType.MUTATION, limit=20, since=since_iso, scope=scope, status="active")
         discoveries = self.store.recent_by_type(
-            EventType.DISCOVERY, limit=10, since=since_iso, scope=scope)
+            EventType.DISCOVERY, limit=10, since=since_iso, scope=scope, status="active")
         outcomes = self.store.recent_by_type(
-            EventType.OUTCOME, limit=5, since=since_iso, scope=scope)
+            EventType.OUTCOME, limit=5, since=since_iso, scope=scope, status="active")
 
-        # Smarter briefing: dedup mutations and detect staleness
+        # Post-process mutations
         mutations = self._deduplicate_mutations(mutations)
+
+        # Detect stale decisions/warnings
         stale = self._detect_stale(warnings + decisions, mutations)
+
+        # Collect all non-mutation active events for sectioning
+        all_active = warnings + decisions + discoveries + outcomes
+
+        # --- Section 1: Critical Warnings ---
+        critical_warnings = [
+            e for e in warnings
+            if e.priority == "critical" or not e.scope
+        ]
+        critical_ids = {e.id for e in critical_warnings}
+
+        # --- Section 2: Focus-Relevant ---
+        focus_relevant: list[Event] = []
+        focus_ids: set[str] = set()
+        if focus:
+            for event in all_active:
+                if event.id in critical_ids:
+                    continue
+                relevance = self._scope_relevance(event, focus)
+                if relevance > 0:
+                    focus_relevant.append(event)
+                    focus_ids.add(event.id)
+            focus_relevant = self._sort_by_priority_recency(focus_relevant)
+
+        # --- Section 3: Other Active ---
+        excluded = critical_ids | focus_ids
+        other_active = [e for e in all_active if e.id not in excluded]
+        other_active = self._sort_by_priority_recency(other_active)
+
+        # --- Section 4: Recently Resolved ---
+        resolved_since = (
+            datetime.now(timezone.utc) - timedelta(hours=resolved_window_hours)
+        ).isoformat()
+        recently_resolved = self.store.recent_resolved(since=resolved_since, limit=10)
+
+        # Sort critical warnings by priority then recency
+        critical_warnings = self._sort_by_priority_recency(critical_warnings)
 
         project_name = self.store.get_meta("project_name") or "unknown"
         total = self.store.count()
@@ -47,11 +100,11 @@ class BriefingGenerator:
             generated_at=datetime.now(timezone.utc).isoformat(),
             total_events=total,
             time_range=time_range,
+            critical_warnings=critical_warnings,
+            focus_relevant=focus_relevant,
+            other_active=other_active,
+            recently_resolved=recently_resolved,
             recent_mutations=mutations,
-            active_warnings=warnings,
-            recent_decisions=decisions,
-            recent_discoveries=discoveries,
-            recent_outcomes=outcomes,
             potentially_stale=stale,
         )
 
@@ -59,6 +112,36 @@ class BriefingGenerator:
     def _default_since() -> str:
         dt = datetime.now(timezone.utc) - timedelta(days=7)
         return dt.isoformat()
+
+    @staticmethod
+    def _scope_relevance(event: Event, focus_path: str) -> int:
+        """Score how relevant an event's scope is to the focus path.
+
+        Returns:
+            3 = exact scope match
+            2 = event scope is parent of focus
+            1 = event scope is child of focus
+            0 = no match
+        """
+        if not event.scope:
+            return 0
+
+        for s in event.scope:
+            if s == focus_path:
+                return 3
+            if focus_path.startswith(s):
+                return 2  # event scope is parent of focus
+            if s.startswith(focus_path):
+                return 1  # event scope is child of focus
+        return 0
+
+    @staticmethod
+    def _sort_by_priority_recency(events: list[Event]) -> list[Event]:
+        """Sort events by priority (critical first) then recency (newest first)."""
+        # Two stable sorts: first by timestamp descending, then by priority ascending
+        events_sorted = sorted(events, key=lambda e: e.timestamp, reverse=True)
+        events_sorted = sorted(events_sorted, key=lambda e: _PRIORITY_ORDER.get(e.priority, 2))
+        return events_sorted
 
     @staticmethod
     def _deduplicate_mutations(mutations: list[Event]) -> list[Event]:

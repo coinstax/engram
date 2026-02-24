@@ -26,7 +26,8 @@ def format_event_compact(event: Event) -> str:
     scope = _scope_str(event.scope)
     scope_part = f" {scope} —" if scope else " —"
     links = f" (links: {len(event.related_ids)})" if event.related_ids else ""
-    return f"[{ts}] [{event.event_type.value}] [{event.agent_id}]{scope_part} {event.content}{links}"
+    priority_tag = f" [{event.priority.upper()}]" if event.priority not in ("normal", None) else ""
+    return f"[{ts}] [{event.event_type.value}]{priority_tag} [{event.agent_id}]{scope_part} {event.content}{links}"
 
 
 def format_compact(events: list[Event]) -> str:
@@ -47,7 +48,7 @@ def format_json(events: list[Event]) -> str:
 
 
 def format_briefing_compact(briefing: BriefingResult) -> str:
-    """Token-efficient briefing for LLM context."""
+    """Token-efficient briefing for LLM context. 4-section structure."""
     lines = [
         f"# Engram Briefing — {briefing.project_name} ({_short_timestamp(briefing.generated_at)} UTC)",
         f"# {briefing.total_events} events | {briefing.time_range}",
@@ -61,18 +62,21 @@ def format_briefing_compact(briefing: BriefingResult) -> str:
         lines.append("")
 
     sections = [
-        ("Warnings", briefing.active_warnings),
-        ("Recent Decisions", briefing.recent_decisions),
+        ("Critical Warnings", briefing.critical_warnings),
+        ("Focus-Relevant", briefing.focus_relevant),
+        ("Other Active", briefing.other_active),
+        ("Recently Resolved", briefing.recently_resolved),
         ("Recent Changes", briefing.recent_mutations),
-        ("Discoveries", briefing.recent_discoveries),
-        ("Outcomes", briefing.recent_outcomes),
     ]
 
     for title, events in sections:
         if events:
             lines.append(f"## {title} ({len(events)})")
             for e in events:
-                lines.append(format_event_compact(e))
+                prefix = ""
+                if title == "Recently Resolved" and e.resolved_reason:
+                    prefix = f"[resolved: {e.resolved_reason}] "
+                lines.append(f"{prefix}{format_event_compact(e)}")
             lines.append("")
 
     return "\n".join(lines).rstrip()
@@ -81,9 +85,11 @@ def format_briefing_compact(briefing: BriefingResult) -> str:
 def format_briefing_json(briefing: BriefingResult) -> str:
     """Full JSON briefing."""
     d = asdict(briefing)
-    # Fix EventType enum serialization
-    for key in ("recent_mutations", "active_warnings", "recent_decisions",
-                "recent_discoveries", "recent_outcomes"):
-        for event in d[key]:
-            event["event_type"] = event["event_type"].value if hasattr(event["event_type"], "value") else event["event_type"]
+    # Fix EventType enum serialization in all event list fields
+    event_keys = ("critical_warnings", "focus_relevant", "other_active",
+                  "recently_resolved", "recent_mutations", "potentially_stale")
+    for key in event_keys:
+        for event in d.get(key, []):
+            if hasattr(event.get("event_type"), "value"):
+                event["event_type"] = event["event_type"].value
     return json.dumps(d, indent=2)

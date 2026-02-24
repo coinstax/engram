@@ -246,7 +246,7 @@ class TestV2ToV3Migration:
         assert "conversation_messages" in tables
 
         # Verify schema version
-        assert store.get_meta("schema_version") == "3"
+        assert store.get_meta("schema_version") == "4"
 
         # Verify existing events survived
         assert store.count() == 1
@@ -266,5 +266,5 @@ class TestV2ToV3Migration:
 
         store2 = EventStore(db_path)
         assert store2.count() == 1
-        assert store2.get_meta("schema_version") == "3"
+        assert store2.get_meta("schema_version") == "4"
         store2.close()
