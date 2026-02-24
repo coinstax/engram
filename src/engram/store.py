@@ -6,9 +6,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engram.models import Event, EventType, QueryFilter
+from engram.models import Event, EventType, QueryFilter, Session
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+STALE_SESSION_HOURS = 24
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS events (
@@ -26,7 +28,8 @@ CREATE TABLE IF NOT EXISTS events (
     priority    TEXT NOT NULL DEFAULT 'normal'
                 CHECK(priority IN ('critical','high','normal','low')),
     resolved_reason TEXT,
-    superseded_by_event_id TEXT
+    superseded_by_event_id TEXT,
+    session_id  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
@@ -75,6 +78,20 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 
 CREATE INDEX IF NOT EXISTS idx_conv_messages_conv
     ON conversation_messages(conv_id, id);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id          TEXT PRIMARY KEY,
+    agent_id    TEXT NOT NULL,
+    focus       TEXT NOT NULL,
+    scope       TEXT,
+    description TEXT,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(ended_at)
+    WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
 """
 
 
@@ -188,6 +205,34 @@ class EventStore:
             )
             self.set_meta("schema_version", "4")
 
+        if version < 5:
+            # Add sessions table
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id          TEXT PRIMARY KEY,
+                    agent_id    TEXT NOT NULL,
+                    focus       TEXT NOT NULL,
+                    scope       TEXT,
+                    description TEXT,
+                    started_at  TEXT NOT NULL,
+                    ended_at    TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(ended_at)
+                    WHERE ended_at IS NULL;
+                CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
+            """)
+            # Add session_id column to events
+            columns = {
+                row[1] for row in
+                self._conn.execute("PRAGMA table_info(events)").fetchall()
+            }
+            if "session_id" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN session_id TEXT"
+                )
+            self.set_meta("schema_version", "5")
+
     @staticmethod
     def _generate_id() -> str:
         return f"evt-{uuid.uuid4().hex[:12]}"
@@ -221,6 +266,10 @@ class EventStore:
             superseded_by = row["superseded_by_event_id"]
         except (IndexError, KeyError):
             superseded_by = None
+        try:
+            session_id = row["session_id"]
+        except (IndexError, KeyError):
+            session_id = None
         return Event(
             id=row["id"],
             timestamp=row["timestamp"],
@@ -233,6 +282,7 @@ class EventStore:
             priority=priority,
             resolved_reason=resolved_reason,
             superseded_by=superseded_by,
+            session_id=session_id,
         )
 
     def insert(self, event: Event) -> Event:
@@ -247,11 +297,11 @@ class EventStore:
 
         with self.conn:
             self.conn.execute(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (event.id, event.timestamp, event.event_type.value,
                  event.agent_id, event.content, scope_json, related_json,
-                 event.status, event.priority),
+                 event.status, event.priority, event.session_id),
             )
         return event
 
@@ -267,12 +317,12 @@ class EventStore:
             related_json = json.dumps(e.related_ids) if e.related_ids else None
             rows.append((e.id, e.timestamp, e.event_type.value,
                          e.agent_id, e.content, scope_json, related_json,
-                         e.status, e.priority))
+                         e.status, e.priority, e.session_id))
 
         with self.conn:
             self.conn.executemany(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
@@ -443,3 +493,109 @@ class EventStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    # --- Session methods ---
+
+    @staticmethod
+    def _generate_session_id() -> str:
+        return f"sess-{uuid.uuid4().hex[:8]}"
+
+    def _row_to_session(self, row: sqlite3.Row) -> Session:
+        scope_raw = row["scope"]
+        scope = json.loads(scope_raw) if scope_raw else None
+        return Session(
+            id=row["id"],
+            agent_id=row["agent_id"],
+            focus=row["focus"],
+            scope=scope,
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            description=row["description"],
+        )
+
+    def insert_session(self, session: Session) -> Session:
+        """Insert a new session. Generates id/started_at if not set."""
+        if not session.id:
+            session.id = self._generate_session_id()
+        if not session.started_at:
+            session.started_at = self._now_iso()
+
+        scope_json = json.dumps(session.scope) if session.scope else None
+
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO sessions (id, agent_id, focus, scope, description, started_at, ended_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.agent_id, session.focus, scope_json,
+                 session.description, session.started_at, session.ended_at),
+            )
+        return session
+
+    def get_session(self, session_id: str) -> Session | None:
+        """Fetch a single session by ID."""
+        row = self.conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return self._row_to_session(row) if row else None
+
+    def end_session(self, session_id: str, ended_at: str | None = None) -> Session:
+        """End an active session."""
+        row = self.conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Session not found: {session_id}")
+        if row["ended_at"] is not None:
+            raise ValueError(f"Session {session_id} is already ended.")
+
+        ended_at = ended_at or self._now_iso()
+        with self.conn:
+            self.conn.execute(
+                "UPDATE sessions SET ended_at = ? WHERE id = ?",
+                (ended_at, session_id),
+            )
+
+        updated = self.conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return self._row_to_session(updated)
+
+    def get_active_session(self, agent_id: str) -> Session | None:
+        """Get the most recent active session for an agent."""
+        row = self.conn.execute(
+            "SELECT * FROM sessions WHERE agent_id = ? AND ended_at IS NULL "
+            "ORDER BY started_at DESC LIMIT 1",
+            (agent_id,),
+        ).fetchone()
+        return self._row_to_session(row) if row else None
+
+    def list_sessions(self, active_only: bool = True,
+                      agent_id: str | None = None) -> list[Session]:
+        """List sessions, optionally filtered."""
+        conditions = []
+        params: list = []
+
+        if active_only:
+            conditions.append("ended_at IS NULL")
+        if agent_id:
+            conditions.append("agent_id = ?")
+            params.append(agent_id)
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        sql = f"SELECT * FROM sessions WHERE {where} ORDER BY started_at DESC"
+        rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_session(r) for r in rows]
+
+    def cleanup_stale_sessions(self, timeout_hours: int = STALE_SESSION_HOURS) -> int:
+        """Auto-end sessions older than timeout_hours. Returns count ended."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+        cutoff_iso = cutoff.isoformat()
+
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE sessions SET ended_at = ? "
+                "WHERE ended_at IS NULL AND started_at < ?",
+                (self._now_iso(), cutoff_iso),
+            )
+        return cursor.rowcount

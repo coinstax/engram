@@ -25,6 +25,18 @@ class Event:
     priority: str = "normal"
     resolved_reason: str | None = None
     superseded_by: str | None = None
+    session_id: str | None = None
+
+
+@dataclass
+class Session:
+    id: str
+    agent_id: str
+    focus: str
+    scope: list[str] | None = None
+    started_at: str = ""
+    ended_at: str | None = None
+    description: str | None = None
 
 
 @dataclass
@@ -44,7 +56,9 @@ class BriefingResult:
     generated_at: str
     total_events: int
     time_range: str
-    # New 4-section structure (P0)
+    # Sessions
+    active_sessions: list[Session] = field(default_factory=list)
+    # 4-section structure
     critical_warnings: list[Event] = field(default_factory=list)
     focus_relevant: list[Event] = field(default_factory=list)
     other_active: list[Event] = field(default_factory=list)
