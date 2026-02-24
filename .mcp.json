@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "engram": {
+      "command": "/home/cdm/engram/.venv/bin/engram-mcp",
+      "env": {
+        "ENGRAM_PROJECT_DIR": "/home/cdm/engram"
+      }
+    }
+  }
+}
