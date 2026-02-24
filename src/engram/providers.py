@@ -10,12 +10,14 @@ class ModelConfig:
     provider: str
     model_id: str
     env_key: str
+    base_url: str | None = None
 
 
 MODELS: dict[str, ModelConfig] = {
     "gpt-4o": ModelConfig("openai", "gpt-4o", "OPENAI_API_KEY"),
     "gemini-flash": ModelConfig("google", "gemini-2.5-flash", "GOOGLE_API_KEY"),
     "claude-sonnet": ModelConfig("anthropic", "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
+    "grok": ModelConfig("openai", "grok-3-latest", "XAI_API_KEY", base_url="https://api.x.ai/v1"),
 }
 
 
@@ -47,9 +49,12 @@ def _get_api_key(config: ModelConfig) -> str:
 
 
 def _send_openai(config: ModelConfig, messages: list[dict], system_prompt: str | None) -> str:
-    """Send via OpenAI SDK."""
+    """Send via OpenAI SDK (also handles OpenAI-compatible APIs like xAI)."""
     from openai import OpenAI
-    client = OpenAI(api_key=_get_api_key(config))
+    kwargs = {"api_key": _get_api_key(config)}
+    if config.base_url:
+        kwargs["base_url"] = config.base_url
+    client = OpenAI(**kwargs)
 
     api_messages = []
     if system_prompt:

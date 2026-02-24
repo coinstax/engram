@@ -18,6 +18,13 @@ class TestModelRegistry:
         assert "gpt-4o" in MODELS
         assert "gemini-flash" in MODELS
         assert "claude-sonnet" in MODELS
+        assert "grok" in MODELS
+
+    def test_grok_uses_openai_provider_with_custom_base_url(self):
+        config = MODELS["grok"]
+        assert config.provider == "openai"
+        assert config.base_url == "https://api.x.ai/v1"
+        assert config.env_key == "XAI_API_KEY"
 
     def test_model_configs_have_required_fields(self):
         for key, config in MODELS.items():
