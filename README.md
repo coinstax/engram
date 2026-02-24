@@ -241,9 +241,13 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.0** — Event store, CLI, MCP server, git bootstrap, briefing, FTS5 search
 
-**v1.1** (current) — Passive observation via Claude Code hooks, event linking, CLAUDE.md auto-write, smarter briefings with dedup/staleness detection, garbage collection
+**v1.1** — Passive observation via Claude Code hooks, event linking, CLAUDE.md auto-write, smarter briefings with dedup/staleness detection, garbage collection
 
-**v2.0** (future) — Semantic search with embeddings, hierarchical summarization, subscription system, conflict detection
+**v1.2** (current) — Multi-turn AI consultation system with external models (GPT-4o, Gemini Flash, Claude Sonnet), persistent conversation storage, CLI + MCP tools
+
+**Next up** — Event lifecycle (resolve/supersede), event priority, scope-aware briefings, session intent, richer mutation capture, hierarchical summarization, conflict detection
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 
 ## License
 
