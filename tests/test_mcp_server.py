@@ -116,3 +116,46 @@ class TestMCPTools:
         assert data["project_name"] == "mcp-test-project"
         assert data["total_events"] == 3
         assert data["db_size_bytes"] > 0
+
+    def test_post_event_with_related_ids(self, mcp_project):
+        from engram.mcp_server import post_event
+        result = post_event(
+            event_type="outcome",
+            content="Linked outcome",
+            related_ids=["evt-abc123"],
+        )
+        assert "[outcome]" in result
+        assert "(links: 1)" in result
+
+        # Verify persisted
+        store = EventStore(mcp_project / ".engram" / "events.db")
+        events = store.recent_by_type(EventType.OUTCOME, limit=1)
+        assert events[0].related_ids == ["evt-abc123"]
+        store.close()
+
+    def test_query_related_to(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        # Post an event that links to an existing one
+        post_event(
+            event_type="outcome",
+            content="Outcome linking to warning",
+            related_ids=["evt-existing"],
+        )
+        result = query(related_to="evt-existing")
+        assert "Outcome linking to warning" in result
+
+    def test_query_related_to_with_type_filter(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        post_event(
+            event_type="outcome",
+            content="Linked outcome",
+            related_ids=["evt-target"],
+        )
+        post_event(
+            event_type="decision",
+            content="Linked decision",
+            related_ids=["evt-target"],
+        )
+        result = query(related_to="evt-target", event_type="decision")
+        assert "Linked decision" in result
+        assert "Linked outcome" not in result

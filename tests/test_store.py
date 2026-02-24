@@ -138,3 +138,68 @@ class TestEventStore:
         store.insert_batch(events)
         results = store.query_structured(QueryFilter(limit=5))
         assert len(results) == 5
+
+    def test_insert_and_retrieve_related_ids(self, store):
+        event = Event(
+            id="", timestamp="", event_type=EventType.OUTCOME,
+            agent_id="test", content="Outcome with links",
+            related_ids=["evt-aaa", "evt-bbb"],
+        )
+        result = store.insert(event)
+        assert result.related_ids == ["evt-aaa", "evt-bbb"]
+
+        retrieved = store.query_structured(QueryFilter(limit=1))
+        assert retrieved[0].related_ids == ["evt-aaa", "evt-bbb"]
+
+    def test_query_related_no_substring_false_match(self, store):
+        """query_related should not match IDs that are prefixes of the target."""
+        e1 = Event(
+            id="", timestamp="", event_type=EventType.OUTCOME,
+            agent_id="test", content="Links to short ID",
+            related_ids=["evt-abc123"],
+        )
+        e2 = Event(
+            id="", timestamp="", event_type=EventType.OUTCOME,
+            agent_id="test", content="Links to longer ID",
+            related_ids=["evt-abc123456"],
+        )
+        store.insert(e1)
+        store.insert(e2)
+
+        results = store.query_related("evt-abc123")
+        assert len(results) == 1
+        assert results[0].content == "Links to short ID"
+
+    def test_query_structured_with_related_to(self, store):
+        """related_to combined with other filters should filter both."""
+        store.insert(Event(
+            id="evt-target", timestamp="2026-02-23T10:00:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="The target decision",
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:05:00+00:00",
+            event_type=EventType.OUTCOME, agent_id="test",
+            content="Related outcome",
+            related_ids=["evt-target"],
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:06:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="Related decision",
+            related_ids=["evt-target"],
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:07:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="Unrelated decision",
+        ))
+
+        # related_to + type filter
+        filters = QueryFilter(
+            event_types=[EventType.DECISION],
+            related_to="evt-target",
+        )
+        results = store.query_structured(filters)
+        assert len(results) == 1
+        assert results[0].content == "Related decision"

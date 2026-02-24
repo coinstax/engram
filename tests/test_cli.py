@@ -2,12 +2,15 @@
 
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
 from engram.cli import cli
+from engram.models import Event, EventType
+from engram.store import EventStore
 
 
 @pytest.fixture
@@ -160,3 +163,97 @@ class TestStatus:
         data = json.loads(result.output)
         assert "total_events" in data
         assert "db_size_bytes" in data
+
+
+class TestGC:
+
+    def test_gc_dry_run(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        # Insert an old mutation
+        store = EventStore(git_project / ".engram" / "events.db")
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        store.insert(Event(
+            id="", timestamp=old_ts, event_type=EventType.MUTATION,
+            agent_id="test", content="Old mutation",
+        ))
+        store.close()
+
+        result = runner.invoke(cli, ["-p", str(git_project), "gc", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Would archive" in result.output
+
+    def test_gc_archives(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        store = EventStore(git_project / ".engram" / "events.db")
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        store.insert(Event(
+            id="", timestamp=old_ts, event_type=EventType.MUTATION,
+            agent_id="test", content="Old mutation",
+        ))
+        store.close()
+
+        result = runner.invoke(cli, ["-p", str(git_project), "gc"])
+        assert result.exit_code == 0
+        assert "Archived" in result.output
+
+    def test_gc_nothing_to_archive(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        result = runner.invoke(cli, ["-p", str(git_project), "gc"])
+        assert result.exit_code == 0
+        assert "No events to archive" in result.output
+
+
+class TestHooksInstall:
+
+    def test_hooks_install(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        result = runner.invoke(cli, ["-p", str(git_project), "hooks", "install"])
+        assert result.exit_code == 0
+        settings_path = git_project / ".claude" / "settings.json"
+        assert settings_path.exists()
+
+
+class TestHookCommands:
+
+    def test_hook_post_tool_use_write(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        stdin_json = json.dumps({
+            "session_id": "sess-test123",
+            "cwd": str(git_project),
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(git_project / "src" / "foo.py")},
+            "tool_response": {"success": True},
+        })
+        result = runner.invoke(
+            cli, ["-p", str(git_project), "hook", "post-tool-use"],
+            input=stdin_json,
+        )
+        assert result.exit_code == 0
+
+        store = EventStore(git_project / ".engram" / "events.db")
+        events = store.recent_by_type(EventType.MUTATION, limit=10)
+        assert len(events) >= 1
+        assert "src/foo.py" in events[0].content
+        store.close()
+
+    def test_hook_session_start(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        # Add a warning so briefing has content
+        store = EventStore(git_project / ".engram" / "events.db")
+        store.insert(Event(
+            id="", timestamp="",
+            event_type=EventType.WARNING, agent_id="test",
+            content="Don't touch the schema",
+        ))
+        store.close()
+
+        stdin_json = json.dumps({
+            "session_id": "sess-test123",
+            "cwd": str(git_project),
+        })
+        result = runner.invoke(
+            cli, ["-p", str(git_project), "hook", "session-start"],
+            input=stdin_json,
+        )
+        assert result.exit_code == 0
+        assert "Engram Briefing" in result.output

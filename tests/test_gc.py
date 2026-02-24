@@ -100,6 +100,30 @@ class TestGarbageCollector:
         assert result["archived"] == 0
         store.close()
 
+    def test_gc_appends_to_existing_archive(self, gc_store):
+        """Running GC twice in same month should accumulate in the archive."""
+        store, engram_dir = gc_store
+        gc = GarbageCollector(store, engram_dir)
+        result1 = gc.collect(max_age_days=90)
+        assert result1["archived"] == 2
+
+        # Add more old events
+        old = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        store.insert_batch([
+            Event(id="", timestamp=old, event_type=EventType.MUTATION,
+                  agent_id="test", content="Another old mutation"),
+            Event(id="", timestamp=old, event_type=EventType.OUTCOME,
+                  agent_id="test", content="Another old outcome"),
+        ])
+
+        result2 = gc.collect(max_age_days=90)
+        assert result2["archived"] == 2
+
+        # Archive should contain all 4 events total
+        archive_store = EventStore(Path(result2["archive_path"]))
+        assert archive_store.count() == 4
+        archive_store.close()
+
     def test_recent_events_preserved(self, gc_store):
         store, engram_dir = gc_store
         gc = GarbageCollector(store, engram_dir)

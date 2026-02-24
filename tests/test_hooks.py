@@ -78,6 +78,45 @@ class TestFileMutationHook:
         assert "src/bar.py" in events[0].content
         store.close()
 
+    def test_edit_tool_with_description(self, hook_project):
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "auth.py"),
+                "description": "Refactored auth logic",
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        store = EventStore(hook_project / ".engram" / "events.db")
+        events = store.recent_by_type(EventType.MUTATION, limit=10)
+        assert len(events) == 1
+        assert "Refactored auth logic" in events[0].content
+        assert "src/auth.py" in events[0].content
+        store.close()
+
+    def test_edit_tool_long_description_truncated(self, hook_project):
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "big.py"),
+                "description": "x" * 2500,
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        store = EventStore(hook_project / ".engram" / "events.db")
+        events = store.recent_by_type(EventType.MUTATION, limit=10)
+        assert len(events) == 1
+        assert len(events[0].content) <= 2000
+        store.close()
+
     def test_debounce_skips_rapid_writes(self, hook_project):
         stdin_data = {
             "session_id": "sess-abc12345",

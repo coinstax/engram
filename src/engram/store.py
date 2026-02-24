@@ -180,7 +180,7 @@ class EventStore:
     def query_structured(self, filters: QueryFilter) -> list[Event]:
         """Query with optional FTS + structured filters."""
         if filters.text and not filters.event_types and not filters.agent_id \
-                and not filters.scope and not filters.since:
+                and not filters.scope and not filters.since and not filters.related_to:
             return self.query_fts(filters.text, filters.limit)
 
         conditions = []
@@ -208,6 +208,13 @@ class EventStore:
         if filters.since:
             conditions.append("e.timestamp >= ?")
             params.append(filters.since)
+
+        if filters.related_to:
+            conditions.append(
+                "(e.related_ids LIKE ? OR e.related_ids LIKE ?)"
+            )
+            params.append(f'%"{filters.related_to}"]%')
+            params.append(f'%"{filters.related_to}",%')
 
         where = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT e.* FROM events e WHERE {where} ORDER BY e.timestamp DESC LIMIT ?"
@@ -239,12 +246,17 @@ class EventStore:
 
     def query_related(self, event_id: str, limit: int = 50) -> list[Event]:
         """Find all events that reference the given event_id in their related_ids."""
+        # Match exact ID in JSON array: "id" followed by ] or ,
         sql = (
             "SELECT * FROM events "
-            "WHERE related_ids LIKE ? "
+            "WHERE (related_ids LIKE ? OR related_ids LIKE ?) "
             "ORDER BY timestamp DESC LIMIT ?"
         )
-        rows = self.conn.execute(sql, (f'%"{event_id}"%', limit)).fetchall()
+        # Match "id"] or "id",  — covers last element and non-last element
+        rows = self.conn.execute(
+            sql,
+            (f'%"{event_id}"]%', f'%"{event_id}",%', limit),
+        ).fetchall()
         return [self._row_to_event(r) for r in rows]
 
     def count(self) -> int:

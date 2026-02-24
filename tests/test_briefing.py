@@ -133,6 +133,65 @@ class TestBriefingGenerator:
         briefing = gen.generate()
         assert len(briefing.recent_mutations) == 2
 
+    def test_deduplication_window_boundary(self, store):
+        """Mutations with >30 min gap between consecutive edits should split."""
+        store.set_meta("project_name", "window-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="a",
+                  content="Edit 1", scope=["src/foo.py"]),
+            Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="a",
+                  content="Edit 2", scope=["src/foo.py"]),
+            # 51 min gap from Edit 2 — new window (>30 min from previous)
+            Event(id="", timestamp="2026-02-23T11:01:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="a",
+                  content="Edit 3", scope=["src/foo.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+        # First two in one window (collapsed), third alone
+        assert len(briefing.recent_mutations) == 2
+        # Verify the collapsed entry mentions "2 edits"
+        collapsed = [e for e in briefing.recent_mutations if "2 edits" in e.content]
+        assert len(collapsed) == 1
+
+    def test_deduplication_different_agents_not_collapsed(self, store):
+        """Mutations from different agents to the same file should not collapse."""
+        store.set_meta("project_name", "agent-dedup-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="agent-a",
+                  content="Agent A edit", scope=["src/foo.py"]),
+            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="agent-b",
+                  content="Agent B edit", scope=["src/foo.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+        assert len(briefing.recent_mutations) == 2
+
+    def test_staleness_scopeless_warning_not_flagged(self, store):
+        """A warning without scope should never be flagged stale."""
+        store.set_meta("project_name", "scopeless-test")
+        events = [
+            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+                  event_type=EventType.WARNING, agent_id="a",
+                  content="General warning with no scope"),
+            Event(id="", timestamp="2026-02-23T11:00:00+00:00",
+                  event_type=EventType.MUTATION, agent_id="b",
+                  content="Modified something", scope=["src/anything.py"]),
+        ]
+        store.insert_batch(events)
+
+        gen = BriefingGenerator(store)
+        briefing = gen.generate()
+        assert len(briefing.potentially_stale) == 0
+
     def test_staleness_shows_in_compact_output(self, store):
         """Stale events should appear in compact briefing output."""
         store.set_meta("project_name", "stale-output")

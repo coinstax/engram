@@ -87,6 +87,39 @@ class TestQueryEngine:
         assert len(results) == 1
         assert "migration" in results[0].content
 
+    def test_query_related_to_with_type_filter(self, store):
+        from engram.models import Event
+        store.insert(Event(
+            id="evt-base", timestamp="2026-02-23T10:00:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="Base decision",
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:05:00+00:00",
+            event_type=EventType.OUTCOME, agent_id="test",
+            content="Related outcome",
+            related_ids=["evt-base"],
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:06:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="Related decision",
+            related_ids=["evt-base"],
+        ))
+        store.insert(Event(
+            id="", timestamp="2026-02-23T10:07:00+00:00",
+            event_type=EventType.DECISION, agent_id="test",
+            content="Unrelated decision",
+        ))
+
+        engine = QueryEngine(store)
+        results = engine.execute(
+            related_to="evt-base",
+            event_types=[EventType.DECISION],
+        )
+        assert len(results) == 1
+        assert results[0].content == "Related decision"
+
 
 class TestFormatting:
 
@@ -125,6 +158,38 @@ class TestFormatting:
         assert "# Engram Briefing" in output
         assert "## Warnings (2)" in output
         assert "## Recent Changes (2)" in output
+
+    def test_format_event_compact_with_related_ids(self):
+        from engram.models import Event, EventType
+        event = Event(
+            id="evt-abc", timestamp="2026-02-23T10:00:00+00:00",
+            event_type=EventType.OUTCOME, agent_id="test",
+            content="Linked outcome",
+            related_ids=["evt-111", "evt-222"],
+        )
+        line = format_event_compact(event)
+        assert "(links: 2)" in line
+
+    def test_format_event_compact_without_related_ids(self):
+        from engram.models import Event, EventType
+        event = Event(
+            id="evt-abc", timestamp="2026-02-23T10:00:00+00:00",
+            event_type=EventType.OUTCOME, agent_id="test",
+            content="No links",
+        )
+        line = format_event_compact(event)
+        assert "(links" not in line
+
+    def test_format_event_compact_empty_related_ids(self):
+        from engram.models import Event, EventType
+        event = Event(
+            id="evt-abc", timestamp="2026-02-23T10:00:00+00:00",
+            event_type=EventType.OUTCOME, agent_id="test",
+            content="Empty links",
+            related_ids=[],
+        )
+        line = format_event_compact(event)
+        assert "(links" not in line
 
     def test_format_briefing_json(self, seeded_store):
         briefing = BriefingResult(
