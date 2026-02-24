@@ -285,19 +285,35 @@ def consult(ctx):
 @click.option("--topic", "-t", required=True, help="Conversation topic")
 @click.option("--models", "-m", required=True, help="Comma-separated model keys (gpt-4o,gemini-flash,claude-sonnet)")
 @click.option("--system", "-s", default=None, help="System prompt for all models")
+@click.option("--context/--no-context", default=True, help="Auto-assemble project context (default: on)")
 @click.option("--message", "-M", default=None, help="Initial message (sends and gets responses immediately)")
 @click.pass_context
-def consult_start(ctx, topic, models, system, message):
+def consult_start(ctx, topic, models, system, context, message):
     """Start a new consultation."""
     from engram.consult import ConsultationEngine
+    from engram.context import ContextAssembler
     project = ctx.obj["project"]
     store = _get_store(project)
 
     model_list = [m.strip() for m in models.split(",")]
     engine = ConsultationEngine(store, project_dir=project)
 
+    # Auto-assemble project context
+    system_prompt = system
+    if context:
+        assembler = ContextAssembler(store, project_dir=project)
+        auto_context = assembler.assemble_for_consultation(
+            topic=topic, models=model_list,
+        )
+        if system:
+            system_prompt = f"{auto_context}\n\n---\n\n## Additional Instructions\n{system}"
+        else:
+            system_prompt = auto_context
+        summary = assembler.context_summary()
+        click.echo(f"Auto-context: {len(system_prompt)} chars ({summary})")
+
     try:
-        conv_id = engine.start(topic, model_list, system_prompt=system)
+        conv_id = engine.start(topic, model_list, system_prompt=system_prompt)
         click.echo(f"Started consultation: {conv_id}")
         click.echo(f"Topic: {topic}")
         click.echo(f"Models: {', '.join(model_list)}")
