@@ -21,7 +21,7 @@ The project started as "AgentBus" (an inter-agent message bus), but after consul
 
 ## For Agents: How to Use Engram
 
-If Engram is configured as an MCP server in your environment, you have four tools available.
+If Engram is configured as an MCP server in your environment, you have eleven tools available.
 
 If Claude Code hooks are installed (`engram hooks install`), file mutations and bash commands are captured automatically — you don't need to manually post `mutation` or `outcome` events.
 
@@ -37,6 +37,7 @@ Returns a structured summary of recent project activity: active warnings, recent
 
 ```
 engram post_event(event_type="decision", content="Using bcrypt over argon2 — existing infra uses bcrypt", scope=["src/auth/hash.py"])
+engram post_event(event_type="warning", content="Don't modify user_sessions — migration pending", priority="critical")
 engram post_event(event_type="outcome", content="JWT fix worked", related_ids=["evt-abc123"])
 ```
 
@@ -76,6 +77,15 @@ engram status
 ```
 
 Returns event count, last activity timestamp, database size. Useful for sanity-checking that Engram is populated.
+
+### `session_start` / `session_end` — Declare what you're working on
+
+```
+engram session_start(focus="Implementing auth middleware", scope=["src/auth/"])
+engram session_end(session_id="ses-abc123")
+```
+
+Sessions let other agents (and future sessions of you) know what's being worked on. Events are automatically tagged with your active session. Briefings auto-focus to your session's scope. Only one session per agent — starting a new one ends the previous.
 
 ### What Makes a Good Event
 
@@ -183,6 +193,11 @@ This project uses Engram for persistent memory across agent sessions.
 - To search past context: `engram query` with search terms
 - Filter by type, scope, time range, or related event IDs
 
+### Sessions (focus tracking)
+- Use `session_start` with `focus` and `scope` to declare what you're working on
+- Events are auto-tagged with your session; briefings auto-scope to your session's focus
+- One session per agent — starting a new one ends the previous
+
 ### Consultations (design validation)
 - Use `start_consultation` to get feedback from external AI models (GPT-4o, Gemini, etc.)
 - Continue with `consult_say`, review with `consult_show`, close with `consult_done`
@@ -215,6 +230,12 @@ engram resolve evt-abc123 --reason "Fixed in PR #42"
 engram supersede evt-abc123 --by evt-def456
 engram reopen evt-abc123
 
+# Sessions
+engram session start --focus "Implementing auth" --scope src/auth
+engram session ls                # list active sessions
+engram session show ses-abc123   # show session details
+engram session end               # end current session
+
 # Garbage collection
 engram gc --dry-run          # preview what would be archived
 engram gc --max-age 90       # archive mutations/outcomes older than 90 days
@@ -227,24 +248,24 @@ engram status
 
 ```
 src/engram/
-  models.py      — Event, QueryFilter, BriefingResult dataclasses
-  store.py       — EventStore: SQLite + WAL mode + FTS5, schema migration (v1→v4)
+  models.py      — Event, Session, QueryFilter, BriefingResult dataclasses
+  store.py       — EventStore: SQLite + WAL + FTS5, schema migration (v1→v5), session CRUD
   query.py       — QueryEngine: relative time parsing, structured + FTS queries
   bootstrap.py   — GitBootstrapper: mines git log + README/CLAUDE.md into seed events
   briefing.py    — BriefingGenerator: 4-section briefings, focus ranking, dedup, staleness
-  formatting.py  — Compact single-line and JSON formatters with priority tags
+  formatting.py  — Compact/JSON formatters for events and sessions, relative timestamps
   context.py     — ContextAssembler: auto-context for consultation system prompts
-  hooks.py       — Claude Code hooks: passive mutation/outcome capture, session briefing
+  hooks.py       — Claude Code hooks: passive mutation/outcome capture, session auto-registration
   gc.py          — GarbageCollector: archives old events, preserves warnings/decisions
-  cli.py         — Click CLI: init, post, query, briefing, resolve, supersede, reopen, gc, hooks
+  cli.py         — Click CLI: init, post, query, briefing, session, resolve, supersede, reopen, gc, hooks
   providers.py   — Multi-model provider dispatch (OpenAI, Google, Anthropic, xAI)
-  consultation.py — Multi-turn consultation engine with persistent conversations
-  mcp_server.py  — FastMCP server: post_event, query, briefing, status, consult tools
+  consult.py     — Multi-turn consultation engine with persistent conversations
+  mcp_server.py  — FastMCP server: 11 tools (events, sessions, briefing, consultations)
 ```
 
-**Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema versioned with automatic migration on connection.
+**Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema v5 with automatic migration from any prior version on connection.
 
-**Event schema:** 11 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `related_ids`, `status`, `priority`, `resolved_reason`, `superseded_by`. Core 7 fields are always populated; lifecycle fields (`status`, `priority`, `resolved_reason`, `superseded_by`) default to sensible values.
+**Event schema:** 12 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `related_ids`, `status`, `priority`, `resolved_reason`, `superseded_by`, `session_id`. Core 7 fields are always populated; lifecycle fields default to sensible values; `session_id` is auto-linked to the active session.
 
 **Design decisions:**
 - FTS5 only, no embeddings — covers 95% of queries at <10k events with zero additional dependencies
