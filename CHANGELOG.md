@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.4.0 — 2026-02-24
+
+### Added
+
+- **Session Intent** — Agents can declare what they're working on via `engram session start --focus "..." --scope src/path/`. Sessions enable auto-scoped briefings, event tagging, and multi-agent visibility. Single-session-per-agent with auto-end of previous.
+- **Session CLI** — `engram session start/end/ls/show` commands for managing agent sessions.
+- **Session MCP tools** — `session_start`, `session_end`, `list_sessions` exposed via MCP server.
+- **Event-session linking** — Events automatically tagged with `session_id` of the active session. MCP `post_event` auto-links to active session. Hooks auto-tag mutations and outcomes.
+- **Active Sessions in briefings** — Briefings now show an "Active Sessions" section listing all currently active agent sessions.
+- **Auto-focus from session** — Briefings auto-scope to the active session's scope when `--focus` is not explicitly provided.
+- **Stale session cleanup** — Sessions older than 24h are auto-ended during session commands and briefing generation.
+- **Hook auto-registration** — SessionStart hook automatically registers a new session, ending any previous one.
+
+### Changed
+
+- Schema v4→v5 migration: adds `sessions` table, `session_id` column on events, and session indexes. Auto-migrates on first connection.
+- `post_event` MCP tool now accepts optional `session_id` parameter.
+- Briefing output now includes active sessions between header and critical warnings.
+
+### Stats
+
+- 229 tests across 13 test modules
+- 14 source modules
+
+---
+
 ## v1.3.0 — 2026-02-24
 
 ### Added

@@ -153,7 +153,7 @@ Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-
 }
 ```
 
-The MCP server exposes eight tools: `post_event`, `query`, `briefing`, `status`, `start_consultation`, `consult_say`, `consult_show`, `consult_done`.
+The MCP server exposes eleven tools: `post_event`, `query`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `start_consultation`, `consult_say`, `consult_show`, `consult_done`.
 
 ### Add Agent Instructions
 
@@ -274,9 +274,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.2** — Multi-turn AI consultation system with external models (GPT-4o, Gemini Flash, Claude Sonnet), persistent conversation storage, CLI + MCP tools
 
-**v1.3** (current) — Event lifecycle (resolve/supersede/reopen), event priority (critical/high/normal/low), scope-aware briefings with `--focus`, 4-section briefing structure, auto-context for consultations, thinking model support
+**v1.3** — Event lifecycle (resolve/supersede/reopen), event priority (critical/high/normal/low), scope-aware briefings with `--focus`, 4-section briefing structure, auto-context for consultations, thinking model support
 
-**Next up** — Session intent, richer mutation capture, hierarchical summarization, conflict detection, context save/restore integration
+**v1.4** (current) — Session intent (`engram session start/end/ls/show`), event-session linking, auto-scoped briefings from active session, stale session cleanup, hook auto-registration
+
+**Next up** — Richer mutation capture, context save/restore, hierarchical summarization, conflict detection
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 
