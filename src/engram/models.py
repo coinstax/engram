@@ -20,6 +20,7 @@ class Event:
     agent_id: str
     content: str
     scope: list[str] | None = None
+    related_ids: list[str] | None = None
 
 
 @dataclass
@@ -30,6 +31,7 @@ class QueryFilter:
     scope: str | None = None
     since: str | None = None
     limit: int = 50
+    related_to: str | None = None
 
 
 @dataclass
@@ -43,3 +45,4 @@ class BriefingResult:
     recent_decisions: list[Event] = field(default_factory=list)
     recent_discoveries: list[Event] = field(default_factory=list)
     recent_outcomes: list[Event] = field(default_factory=list)
+    potentially_stale: list[Event] = field(default_factory=list)

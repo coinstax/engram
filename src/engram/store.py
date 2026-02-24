@@ -8,6 +8,8 @@ from pathlib import Path
 
 from engram.models import Event, EventType, QueryFilter
 
+SCHEMA_VERSION = 2
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS events (
     id          TEXT PRIMARY KEY,
@@ -17,7 +19,8 @@ CREATE TABLE IF NOT EXISTS events (
     agent_id    TEXT NOT NULL,
     content     TEXT NOT NULL
                 CHECK(length(content) <= 2000),
-    scope       TEXT
+    scope       TEXT,
+    related_ids TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
@@ -49,6 +52,7 @@ class EventStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._conn: sqlite3.Connection | None = None
+        self._migrated = False
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -57,6 +61,8 @@ class EventStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.row_factory = sqlite3.Row
+        if not self._migrated:
+            self._migrate()
         return self._conn
 
     def close(self):
@@ -67,6 +73,31 @@ class EventStore:
     def initialize(self) -> None:
         """Create tables, indexes, and FTS5 triggers."""
         self.conn.executescript(SCHEMA_SQL)
+
+    def _migrate(self) -> None:
+        """Run schema migrations if needed."""
+        self._migrated = True
+        # Check if meta table exists (may not for brand-new DBs before initialize)
+        tables = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='meta'"
+        ).fetchone()
+        if not tables:
+            return  # DB not yet initialized, nothing to migrate
+
+        current = self.get_meta("schema_version")
+        version = int(current) if current else 1
+
+        if version < 2:
+            # Add related_ids column if missing
+            columns = {
+                row[1] for row in
+                self._conn.execute("PRAGMA table_info(events)").fetchall()
+            }
+            if "related_ids" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE events ADD COLUMN related_ids TEXT"
+                )
+            self.set_meta("schema_version", str(SCHEMA_VERSION))
 
     @staticmethod
     def _generate_id() -> str:
@@ -79,6 +110,12 @@ class EventStore:
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         scope_raw = row["scope"]
         scope = json.loads(scope_raw) if scope_raw else None
+        # Handle both v1.0 (no related_ids column) and v1.1 databases
+        try:
+            related_raw = row["related_ids"]
+            related = json.loads(related_raw) if related_raw else None
+        except (IndexError, KeyError):
+            related = None
         return Event(
             id=row["id"],
             timestamp=row["timestamp"],
@@ -86,6 +123,7 @@ class EventStore:
             agent_id=row["agent_id"],
             content=row["content"],
             scope=scope,
+            related_ids=related,
         )
 
     def insert(self, event: Event) -> Event:
@@ -96,13 +134,14 @@ class EventStore:
             event.timestamp = self._now_iso()
 
         scope_json = json.dumps(event.scope) if event.scope else None
+        related_json = json.dumps(event.related_ids) if event.related_ids else None
 
         with self.conn:
             self.conn.execute(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (event.id, event.timestamp, event.event_type.value,
-                 event.agent_id, event.content, scope_json),
+                 event.agent_id, event.content, scope_json, related_json),
             )
         return event
 
@@ -115,13 +154,14 @@ class EventStore:
             if not e.timestamp:
                 e.timestamp = self._now_iso()
             scope_json = json.dumps(e.scope) if e.scope else None
+            related_json = json.dumps(e.related_ids) if e.related_ids else None
             rows.append((e.id, e.timestamp, e.event_type.value,
-                         e.agent_id, e.content, scope_json))
+                         e.agent_id, e.content, scope_json, related_json))
 
         with self.conn:
             self.conn.executemany(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
@@ -195,6 +235,16 @@ class EventStore:
         params.append(limit)
 
         rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_event(r) for r in rows]
+
+    def query_related(self, event_id: str, limit: int = 50) -> list[Event]:
+        """Find all events that reference the given event_id in their related_ids."""
+        sql = (
+            "SELECT * FROM events "
+            "WHERE related_ids LIKE ? "
+            "ORDER BY timestamp DESC LIMIT ?"
+        )
+        rows = self.conn.execute(sql, (f'%"{event_id}"%', limit)).fetchall()
         return [self._row_to_event(r) for r in rows]
 
     def count(self) -> int:

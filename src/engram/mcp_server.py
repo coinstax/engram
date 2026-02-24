@@ -44,6 +44,7 @@ def post_event(
     content: str,
     agent_id: str = "claude-code",
     scope: list[str] | None = None,
+    related_ids: list[str] | None = None,
 ) -> str:
     """Post an event to the Engram project memory.
 
@@ -59,6 +60,7 @@ def post_event(
         content: Description of the event (max 2000 chars)
         agent_id: Identifier for this agent session
         scope: List of file paths this event relates to
+        related_ids: List of related event IDs (for linking outcomes to decisions, etc.)
     """
     store = _get_store()
     try:
@@ -71,6 +73,7 @@ def post_event(
             agent_id=agent_id,
             content=content,
             scope=scope,
+            related_ids=related_ids,
         )
         result = store.insert(event)
         return format_compact([result])
@@ -85,6 +88,7 @@ def query(
     scope: str | None = None,
     since: str | None = None,
     agent_id: str | None = None,
+    related_to: str | None = None,
     limit: int = 20,
     format: str = "compact",
 ) -> str:
@@ -96,6 +100,7 @@ def query(
         scope: Filter by file path prefix
         since: Time filter: "24h", "7d", "2w", or ISO date
         agent_id: Filter by agent identifier
+        related_to: Find events linked to this event ID
         limit: Maximum results (default 20)
         format: Output format: "compact" or "json"
     """
@@ -105,7 +110,7 @@ def query(
         engine = QueryEngine(store)
         results = engine.execute(
             text=text, event_types=types, agent_id=agent_id,
-            scope=scope, since=since, limit=limit,
+            scope=scope, since=since, limit=limit, related_to=related_to,
         )
         if format == "json":
             return format_json(results)

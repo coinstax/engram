@@ -46,10 +46,14 @@ class TestInit:
         result = runner.invoke(cli, ["-p", str(git_project), "init"])
         assert "already initialized" in result.output
 
-    def test_init_shows_claude_snippet(self, runner, git_project):
+    def test_init_writes_claude_md(self, runner, git_project):
         result = runner.invoke(cli, ["-p", str(git_project), "init"])
         assert "CLAUDE.md" in result.output
-        assert "engram briefing" in result.output
+        claude_md = git_project / "CLAUDE.md"
+        assert claude_md.exists()
+        content = claude_md.read_text()
+        assert "engram briefing" in content
+        assert "## Project Memory (Engram)" in content
 
 
 class TestPost:

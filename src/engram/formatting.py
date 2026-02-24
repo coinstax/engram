@@ -25,7 +25,8 @@ def format_event_compact(event: Event) -> str:
     ts = _short_timestamp(event.timestamp)
     scope = _scope_str(event.scope)
     scope_part = f" {scope} —" if scope else " —"
-    return f"[{ts}] [{event.event_type.value}] [{event.agent_id}]{scope_part} {event.content}"
+    links = f" (links: {len(event.related_ids)})" if event.related_ids else ""
+    return f"[{ts}] [{event.event_type.value}] [{event.agent_id}]{scope_part} {event.content}{links}"
 
 
 def format_compact(events: list[Event]) -> str:
@@ -52,6 +53,12 @@ def format_briefing_compact(briefing: BriefingResult) -> str:
         f"# {briefing.total_events} events | {briefing.time_range}",
         "",
     ]
+
+    if briefing.potentially_stale:
+        lines.append(f"## Possibly Stale ({len(briefing.potentially_stale)})")
+        for e in briefing.potentially_stale:
+            lines.append(f"[POSSIBLY STALE] {format_event_compact(e)}")
+        lines.append("")
 
     sections = [
         ("Warnings", briefing.active_warnings),

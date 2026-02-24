@@ -66,8 +66,12 @@ class QueryEngine:
                 agent_id: str | None = None,
                 scope: str | None = None,
                 since: str | None = None,
-                limit: int = 50) -> list[Event]:
+                limit: int = 50,
+                related_to: str | None = None) -> list[Event]:
         """Execute a query with normalized parameters."""
+        if related_to and not any([text, event_types, agent_id, scope, since]):
+            return self.store.query_related(related_to, limit)
+
         normalized_since = parse_since(since) if since else None
 
         filters = QueryFilter(
@@ -77,5 +81,6 @@ class QueryEngine:
             scope=scope,
             since=normalized_since,
             limit=limit,
+            related_to=related_to,
         )
         return self.store.query_structured(filters)

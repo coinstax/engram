@@ -35,6 +35,23 @@ def _resolve_project(project: str) -> Path:
     return Path(project).resolve()
 
 
+def _auto_write_claude_md(project: Path) -> str:
+    """Auto-write Engram section to CLAUDE.md. Returns status message."""
+    claude_md = project / "CLAUDE.md"
+    marker = "## Project Memory (Engram)"
+
+    if claude_md.exists():
+        content = claude_md.read_text(encoding="utf-8")
+        if marker in content:
+            return "CLAUDE.md already has Engram section."
+        with claude_md.open("a", encoding="utf-8") as f:
+            f.write("\n\n" + CLAUDE_MD_SNIPPET + "\n")
+        return "Appended Engram section to CLAUDE.md."
+    else:
+        claude_md.write_text(CLAUDE_MD_SNIPPET + "\n", encoding="utf-8")
+        return "Created CLAUDE.md with Engram section."
+
+
 def _get_store(project: Path) -> EventStore:
     """Get an initialized EventStore for the project."""
     db_path = project / ENGRAM_DIR / DB_NAME
@@ -91,11 +108,11 @@ def init(ctx, max_commits):
     store.set_meta("initialized_at", datetime.now(timezone.utc).isoformat())
 
     click.echo(f"Engram initialized for '{project_name}'. {event_count} events seeded from git history.")
-    click.echo()
-    click.echo("Add this to your CLAUDE.md:")
-    click.echo("---")
-    click.echo(CLAUDE_MD_SNIPPET)
-    click.echo("---")
+
+    # Auto-write CLAUDE.md
+    claude_msg = _auto_write_claude_md(project)
+    click.echo(claude_msg)
+    click.echo("Run 'engram hooks install' to enable passive observation via Claude Code hooks.")
 
     store.close()
 
@@ -106,10 +123,11 @@ def init(ctx, max_commits):
 @click.option("--content", "-c", required=True, help="Event content (max 2000 chars)")
 @click.option("--scope", "-s", multiple=True, help="File path(s)")
 @click.option("--agent", "-a", default=None, help="Agent identifier")
+@click.option("--related", "-r", multiple=True, help="Related event ID(s)")
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def post(ctx, event_type, content, scope, agent, fmt):
+def post(ctx, event_type, content, scope, agent, related, fmt):
     """Post an event to the store."""
     project = ctx.obj["project"]
     store = _get_store(project)
@@ -120,6 +138,7 @@ def post(ctx, event_type, content, scope, agent, fmt):
 
     agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
     scope_list = list(scope) if scope else None
+    related_list = list(related) if related else None
 
     event = Event(
         id="", timestamp="",
@@ -127,6 +146,7 @@ def post(ctx, event_type, content, scope, agent, fmt):
         agent_id=agent_id,
         content=content,
         scope=scope_list,
+        related_ids=related_list,
     )
     result = store.insert(event)
 
@@ -144,11 +164,12 @@ def post(ctx, event_type, content, scope, agent, fmt):
 @click.option("--scope", "-s", default=None, help="Scope path prefix")
 @click.option("--since", default=None, help="Time filter: 24h, 7d, or ISO date")
 @click.option("--agent", "-a", default=None, help="Filter by agent")
+@click.option("--related-to", default=None, help="Find events related to this event ID")
 @click.option("--limit", "-n", default=50, help="Max results")
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def query(ctx, text, event_type, scope, since, agent, limit, fmt):
+def query(ctx, text, event_type, scope, since, agent, related_to, limit, fmt):
     """Query events. Supports FTS text and/or structured filters."""
     project = ctx.obj["project"]
     store = _get_store(project)
@@ -157,7 +178,7 @@ def query(ctx, text, event_type, scope, since, agent, limit, fmt):
     engine = QueryEngine(store)
     results = engine.execute(
         text=text, event_types=types, agent_id=agent,
-        scope=scope, since=since, limit=limit,
+        scope=scope, since=since, limit=limit, related_to=related_to,
     )
 
     if fmt == "json":
@@ -222,3 +243,84 @@ def status(ctx, fmt):
         click.echo(f"DB size:      {db_size:,} bytes")
 
     store.close()
+
+
+@cli.command()
+@click.option("--max-age", default=90, help="Archive events older than N days (default: 90)")
+@click.option("--dry-run", is_flag=True, help="Show what would be archived without doing it")
+@click.pass_context
+def gc(ctx, max_age, dry_run):
+    """Archive old events to reduce database size.
+
+    Only mutations and outcomes are archived. Warnings and decisions
+    are always preserved regardless of age.
+    """
+    from engram.gc import GarbageCollector
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    collector = GarbageCollector(store, project / ENGRAM_DIR)
+    result = collector.collect(max_age_days=max_age, dry_run=dry_run)
+
+    if dry_run:
+        click.echo(f"Would archive {result['would_archive']} events older than {max_age} days.")
+    elif result["archived"] == 0:
+        click.echo(f"No events to archive (cutoff: {max_age} days).")
+    else:
+        click.echo(f"Archived {result['archived']} events to {result['archive_path']}.")
+
+    store.close()
+
+
+# --- Hook management (user-facing) ---
+
+@cli.group()
+@click.pass_context
+def hooks(ctx):
+    """Manage Claude Code hooks for passive observation."""
+    pass
+
+
+@hooks.command()
+@click.pass_context
+def install(ctx):
+    """Install Claude Code hooks for automatic activity capture."""
+    from engram.hooks import install_hooks
+    project = ctx.obj["project"]
+    result = install_hooks(project)
+    click.echo(result["message"])
+
+
+# --- Hook handlers (internal, called by Claude Code) ---
+
+@cli.group(hidden=True)
+@click.pass_context
+def hook(ctx):
+    """Internal hook handlers invoked by Claude Code."""
+    pass
+
+
+@hook.command("post-tool-use")
+@click.pass_context
+def hook_post_tool_use(ctx):
+    """Handle PostToolUse hook. Reads JSON from stdin."""
+    import json as _json
+    data = _json.load(sys.stdin)
+    project_dir = Path(data.get("cwd", str(ctx.obj["project"]))).resolve()
+
+    from engram.hooks import handle_post_tool_use
+    handle_post_tool_use(data, project_dir)
+
+
+@hook.command("session-start")
+@click.pass_context
+def hook_session_start(ctx):
+    """Handle SessionStart hook. Outputs briefing to stdout."""
+    import json as _json
+    data = _json.load(sys.stdin)
+    project_dir = Path(data.get("cwd", str(ctx.obj["project"]))).resolve()
+
+    from engram.hooks import handle_session_start
+    output = handle_session_start(data, project_dir)
+    if output:
+        click.echo(output)
