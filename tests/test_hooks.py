@@ -272,6 +272,75 @@ class TestInstallHooks:
         assert len(custom_hooks) == 1
 
 
+class TestAutoCheckpoint:
+
+    def test_write_to_context_dir_creates_checkpoint(self, hook_project):
+        # Create context dir and file
+        ctx_dir = hook_project / ".claude" / "context"
+        ctx_dir.mkdir(parents=True)
+        ctx_file = ctx_dir / "session.md"
+        ctx_file.write_text("# Context\n\n## Key Design Decisions\n\nSome decision\n")
+
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(ctx_file)},
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        store = EventStore(hook_project / ".engram" / "events.db")
+        checkpoint = store.get_latest_checkpoint()
+        assert checkpoint is not None
+        assert "session.md" in checkpoint.file_path
+        store.close()
+
+    def test_write_to_non_context_dir_no_checkpoint(self, hook_project):
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(hook_project / "src" / "foo.py")},
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        store = EventStore(hook_project / ".engram" / "events.db")
+        checkpoint = store.get_latest_checkpoint()
+        assert checkpoint is None
+        store.close()
+
+    def test_auto_checkpoint_enriches_file(self, hook_project):
+        # Seed a decision event
+        store = EventStore(hook_project / ".engram" / "events.db")
+        from engram.models import Event
+        store.insert(Event(
+            id="", timestamp="", event_type=EventType.DECISION,
+            agent_id="cli", content="Use SQLite for zero-config local storage",
+        ))
+        store.close()
+
+        # Create context file with a matching section
+        ctx_dir = hook_project / ".claude" / "context"
+        ctx_dir.mkdir(parents=True)
+        ctx_file = ctx_dir / "session.md"
+        ctx_file.write_text("# Context\n\n## Key Design Decisions\n\nOld stuff\n\n## Other\n")
+
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(ctx_file)},
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        content = ctx_file.read_text()
+        assert "engram:start" in content
+        assert "SQLite" in content
+
+
 class TestExtractCommandName:
 
     def test_simple_command(self):

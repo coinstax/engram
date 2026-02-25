@@ -173,6 +173,36 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     )
     store.insert(event)
 
+    # Auto-checkpoint when a context file is written
+    _maybe_auto_checkpoint(file_path, rel_path, agent_id, active_session, store, project_dir)
+
+
+def _maybe_auto_checkpoint(file_path: str, rel_path: str, agent_id: str,
+                           active_session, store: EventStore,
+                           project_dir: Path) -> None:
+    """Auto-run checkpoint when a context file is written to .claude/context/."""
+    # Check if the file is a context markdown file
+    if ".claude/context/" not in rel_path and ".claude/context/" not in file_path:
+        return
+    if not file_path.endswith(".md"):
+        return
+
+    abs_path = Path(file_path)
+    if not abs_path.is_file():
+        return
+
+    try:
+        from engram.checkpoint import CheckpointEngine
+        engine = CheckpointEngine(store, project_dir=project_dir)
+        engine.save(
+            file_path=str(abs_path),
+            agent_id=agent_id,
+            enrich=True,
+            session_id=active_session.id if active_session else None,
+        )
+    except Exception:
+        pass  # Non-fatal — checkpoint is a bonus, not critical
+
 
 def _handle_bash_outcome(tool_input: dict, stdin_data: dict,
                          store: EventStore) -> None:
