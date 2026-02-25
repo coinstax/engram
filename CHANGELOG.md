@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.6.0 — 2026-02-25
+
+### Added
+
+- **Richer Mutation Capture (#5)** — PostToolUse hook now generates informative summaries instead of bare "Modified filepath" messages:
+  - **Edit tool**: Extracts `old_string`/`new_string` from tool input. Short changes (≤3 lines per side) produce inline format: `Edited src/auth.py: 'return False' -> 'return True'`. Longer changes produce compact unified diffs with `@@` hunk markers.
+  - **Write tool**: Generates `Created path (N lines): Foo, bar` or `Wrote path (N lines): Foo, bar` with structural symbol extraction (class/function names) via lightweight regex.
+  - **Language support**: Symbol extraction for `.py`, `.js`, `.ts`, `.rs`, `.go` files. Unknown extensions gracefully fall back to line count only.
+  - **Truncation**: Content exceeding 2000 chars is truncated with a visible `[truncated]` marker.
+  - **Graceful degradation**: Missing `old_string`/`new_string` or `content` fields handled without errors.
+- **`_extract_symbols()` utility** — Regex-based top-level symbol extraction (classes, functions, structs, enums, interfaces) scanning first 100 lines of file content.
+
+### Changed
+
+- `_handle_file_mutation` in hooks.py now dispatches to `_summarize_edit` or `_summarize_write` based on tool name, instead of generating a generic "Modified" message.
+- ROADMAP.md updated: Context Save/Restore (#8) moved to Shipped section (v1.5).
+
+### Stats
+
+- 278 tests across 14 test modules (15 new: 6 for symbol extraction, 9 for mutation capture)
+- 15 source modules
+
+---
+
 ## v1.5.0 — 2026-02-25
 
 ### Added

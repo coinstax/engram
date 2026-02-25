@@ -264,7 +264,7 @@ src/engram/
   briefing.py    — BriefingGenerator: 4-section briefings, focus ranking, dedup, staleness
   formatting.py  — Compact/JSON formatters for events and sessions, relative timestamps
   context.py     — ContextAssembler: auto-context for consultation system prompts
-  hooks.py       — Claude Code hooks: passive mutation/outcome capture, session auto-registration
+  hooks.py       — Claude Code hooks: rich mutation/outcome capture, structural extraction, session auto-registration
   gc.py          — GarbageCollector: archives old events, preserves warnings/decisions
   checkpoint.py  — CheckpointEngine: context save/restore integration, file enrichment
   cli.py         — Click CLI: init, post, query, briefing, checkpoint, session, resolve, supersede, reopen, gc, hooks
@@ -285,6 +285,7 @@ src/engram/
 - Zero-config, local-first — SQLite only, no cloud, no servers for core functionality
 - Single runtime dependency (click) — MCP support is optional
 - Passive-first — hooks capture activity automatically; manual posting is for high-signal events only
+- Rich mutation capture — Edit diffs and Write structural extraction produce informative summaries, not just file paths
 - Warnings and decisions are never garbage-collected — they represent permanent project knowledge
 
 ## Design Process
@@ -309,9 +310,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.4** — Session intent (`engram session start/end/ls/show`), event-session linking, auto-scoped briefings from active session, stale session cleanup, hook auto-registration, consult file feature
 
-**v1.5** (current) — Context save/restore integration (`engram checkpoint`, `engram briefing --full`), file enrichment with Engram events, `save_checkpoint` MCP tool
+**v1.5** — Context save/restore integration (`engram checkpoint`, `engram briefing --full`), file enrichment with Engram events, `save_checkpoint` MCP tool
 
-**Next up** — Richer mutation capture, hierarchical summarization, conflict detection
+**v1.6** (current) — Richer mutation capture: Edit tool diffs (`'old' -> 'new'` or unified diff), Write tool structural extraction (class/def names for .py, .js, .ts, .rs, .go), line counts, created/wrote distinction
+
+**Next up** — Hierarchical summarization, conflict detection
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 
