@@ -36,38 +36,25 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 - MCP: start_consultation, consult_say, consult_show, consult_done
 - Markdown audit trail for all consultations
 
+### v1.3 (2026-02-24)
+- Event Lifecycle: resolve, supersede, reopen commands and status field (active/resolved/superseded)
+- Event Priority: critical/high/normal/low with briefing sort order
+- Scope-Aware Briefings: 4-section structure (Critical Warnings, Focus-Relevant, Other Active, Recently Resolved), relevance scoring (exact=3, parent=2, child=1)
+- Schema v4 migration (status, priority, resolved_reason, superseded_by_event_id columns)
+- Auto-context assembly for consultations (context.py)
+
+### v1.4 (2026-02-24)
+- Session Intent: declare agent focus and scope per session
+- Session-event linking via session_id column on events table
+- Auto-scoped briefings from active session scope
+- Hook auto-registration of sessions (SessionStart hook)
+- Single-session-per-agent with auto-end, stale cleanup (24h)
+- Schema v5 migration (sessions table, session_id on events)
+- Consult File: `--file` flag on CLI, `start_consultation_file` MCP tool, `/consult` slash command
+
 ---
 
 ## Planned
-
-### P0 — Critical
-
-#### 1. Event Lifecycle (resolve/supersede)
-**Problem:** Warnings and decisions live forever or get GC'd — no middle ground. A resolved warning keeps polluting briefings. A reversed decision misleads future agents.
-
-**Solution:** Add `status` field to events: `active` (default), `resolved`, `superseded`. New commands:
-- `engram resolve <event-id> --reason "fixed in PR #42"`
-- `engram supersede <event-id> --by <new-event-id>`
-
-Briefings should only surface `active` events by default, but resolved/superseded events remain queryable for history. Schema v4 migration adds `status` and `resolved_by` columns.
-
-#### 2. Scope-Aware Briefings
-**Problem:** The briefing is a chronological dump by type. If I'm about to work on `src/auth/`, I need auth-related warnings and decisions surfaced first, not buried in a list of unrelated mutations.
-
-**Solution:** Enhance `engram briefing --focus <path>` to:
-- Rank events by relevance to the focus path (exact scope match > parent dir > unscoped)
-- Show a "Relevant to your focus" section at the top
-- Still include global warnings (they apply everywhere)
-- Weight recent events higher than old ones
-
-The MCP `briefing` tool already accepts `scope` but only filters — it should rank and prioritize instead.
-
-#### 3. Event Priority
-**Problem:** A critical warning about data loss and a minor naming convention discovery get equal treatment in briefings.
-
-**Solution:** Add optional `priority` field: `critical`, `high`, `normal` (default), `low`. Briefings sort by priority within each section. Critical warnings always appear first regardless of age. Schema migration adds `priority` column with default `normal`.
-
----
 
 ### P1 — High
 
@@ -92,18 +79,6 @@ Summaries are stored as special events (new type: `summary`) with links to the e
 
 Keep the 2000-char limit — this is a summary, not a full diff.
 
-#### 6. Session Intent
-**Problem:** No way to declare "I'm working on X this session." Briefings, future notifications, and conflict detection would all benefit from knowing what the current agent is focused on.
-
-**Solution:** Add session registration:
-- `engram session start --focus "refactoring auth module" --scope src/auth/`
-- `engram session end`
-- Stored in a `sessions` table (id, agent_id, focus, scope, started_at, ended_at)
-- Briefings auto-detect scope from active session if `--focus` not provided
-- Foundation for multi-agent awareness (P2) and conflict detection (P2)
-
-The SessionStart hook could auto-register sessions.
-
 #### 7. Conflict Detection
 **Problem:** Two agents can modify the same file or make contradictory decisions without knowing. This is the "isolation" problem from Engram's README.
 
@@ -112,7 +87,7 @@ The SessionStart hook could auto-register sessions.
 - Decision post: if an existing active decision covers the same scope, surface it
 - Conflict warnings are surfaced in briefings and optionally as hook output
 
-Depends on session intent (#6) to know what agents are currently active.
+Builds on session intent (#6, shipped in v1.4) to know what agents are currently active.
 
 #### 8. Context Save/Restore Integration
 **Problem:** Context save/restore tools (e.g., Claude Code's `/tools:context-save` and `/tools:context-restore`) write static markdown snapshots to `.claude/context/`. Meanwhile, Engram already accumulates rich, structured, searchable context throughout every session — but the two systems are completely disconnected. Agents manually duplicate work that Engram already does.
@@ -160,7 +135,7 @@ Keep it optional — most events are project-specific, and that's correct.
 - Briefings include "Currently active: agent-X working on src/auth, agent-Y working on tests"
 - Foundation for conflict detection (#7)
 
-Requires sessions table from #6.
+Uses sessions table from #6 (shipped in v1.4).
 
 #### 12. Smarter Briefing Ranking
 **Problem:** Events are listed chronologically within sections. More relevant events should surface higher.
@@ -172,7 +147,7 @@ Requires sessions table from #6.
 - Event type weight (warnings > decisions > discoveries > mutations)
 - Link density (events with many related events are more significant)
 
-This is an evolution of scope-aware briefings (#2) and priority (#3) — becomes possible once those land.
+This is an evolution of scope-aware briefings (#2) and priority (#3), both shipped in v1.3. All dependencies met.
 
 ---
 
@@ -214,38 +189,34 @@ Auto-generate CHANGELOG.md entries from git commits and event history on version
 ## Dependencies Between Features
 
 ```
-Session Intent (#6) ──► Multi-Agent Awareness (#11)
+✅ Session Intent (#6) ──► Multi-Agent Awareness (#11)
        │                         │
        ▼                         ▼
-Scope-Aware Briefings (#2) ◄── Conflict Detection (#7)
+✅ Scope-Aware Briefings (#2) ◄── Conflict Detection (#7)
        │
        ▼
-Smarter Briefing Ranking (#12) ◄── Event Priority (#3)
-                                ◄── Event Lifecycle (#1)
+Smarter Briefing Ranking (#12) ◄── ✅ Event Priority (#3)
+                                ◄── ✅ Event Lifecycle (#1)
 
-Context Save/Restore (#8)       ── standalone (benefits from #6)
+Context Save/Restore (#8)       ── standalone (benefits from ✅ #6)
 Hierarchical Summarization (#4) ── standalone
 Richer Mutation Capture (#5)    ── standalone
 Outcome Tracking (#9)           ── standalone (uses existing related_ids)
 Cross-Project Knowledge (#10)   ── standalone
 Semantic Search (#13)           ── standalone
-Subscriptions (#14)             ── depends on Session Intent (#6)
+Subscriptions (#14)             ── depends on ✅ Session Intent (#6)
 ```
 
 ## Suggested Build Order
 
-Based on dependencies and impact:
+All dependencies are now shipped (✅ #1, #2, #3, #6). Remaining features can be built in any order based on impact:
 
-1. **Event Lifecycle** (#1) — standalone, immediately improves briefing quality
-2. **Event Priority** (#3) — standalone, small schema change, big briefing improvement
-3. **Scope-Aware Briefings** (#2) — builds on #1 and #3
-4. **Context Save/Restore** (#8) — standalone, closes the context persistence gap
-5. **Session Intent** (#6) — enables #7, #11, #12
-6. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
-7. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
-8. **Conflict Detection** (#7) — builds on #6
-9. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
-10. **Cross-Project Knowledge** (#10) — standalone but lower urgency
-11. **Multi-Agent Awareness** (#11) — builds on #6
-12. **Smarter Briefing Ranking** (#12) — builds on #1, #2, #3, #6
-13-16. P3 items as needed
+1. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
+2. **Context Save/Restore** (#8) — standalone, closes the context persistence gap
+3. **Conflict Detection** (#7) — all deps shipped (#6), solves multi-agent isolation
+4. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
+5. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
+6. **Multi-Agent Awareness** (#11) — all deps shipped (#6)
+7. **Smarter Briefing Ranking** (#12) — all deps shipped (#1, #2, #3, #6)
+8. **Cross-Project Knowledge** (#10) — standalone but lower urgency
+9-12. P3 items as needed
