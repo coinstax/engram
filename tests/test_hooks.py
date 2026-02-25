@@ -10,6 +10,7 @@ from engram.hooks import (
     handle_session_start,
     install_hooks,
     _extract_command_name,
+    _extract_symbols,
     _should_debounce,
 )
 from engram.models import EventType
@@ -354,3 +355,249 @@ class TestExtractCommandName:
 
     def test_command_with_env_var(self):
         assert _extract_command_name("NODE_ENV=prod node server.js") == "node"
+
+
+class TestExtractSymbols:
+
+    def test_python_class_and_def(self):
+        content = "class Foo:\n    pass\n\ndef bar():\n    pass\n\nasync def baz():\n    pass\n"
+        assert _extract_symbols(content, ".py") == ["Foo", "bar", "baz"]
+
+    def test_unknown_extension_returns_empty(self):
+        assert _extract_symbols("key: value", ".yaml") == []
+
+    def test_max_lines_limit(self):
+        content = "\n".join(f"def func_{i}(): pass" for i in range(200))
+        symbols = _extract_symbols(content, ".py", max_lines=5)
+        assert len(symbols) == 5
+
+    def test_deduplication(self):
+        content = "def foo(): pass\ndef foo(): pass\n"
+        assert _extract_symbols(content, ".py") == ["foo"]
+
+    def test_go_func(self):
+        content = "func main() {\n}\n\nfunc (s *Server) Handle() {\n}\n"
+        assert _extract_symbols(content, ".go") == ["main", "Handle"]
+
+    def test_rust_symbols(self):
+        content = "pub struct Config {\n}\n\npub fn new() -> Config {\n}\n\nenum State {\n}\n"
+        assert _extract_symbols(content, ".rs") == ["Config", "new", "State"]
+
+
+class TestRicherMutationCapture:
+
+    def test_edit_short_change_inline(self, hook_project):
+        """Single-line edit produces inline 'old' -> 'new' format."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "math.py"),
+                "old_string": "return x + 1",
+                "new_string": "return x + 2",
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            content = events[0].content
+            assert "Edited" in content
+            assert "return x + 1" in content
+            assert "return x + 2" in content
+            assert "->" in content
+        finally:
+            store.close()
+
+    def test_edit_with_description(self, hook_project):
+        """Description is included in the Edit summary."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "auth.py"),
+                "old_string": "return False",
+                "new_string": "return True",
+                "description": "Fix login bug",
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            content = events[0].content
+            assert "Fix login bug" in content
+            assert "src/auth.py" in content
+        finally:
+            store.close()
+
+    def test_edit_long_change_diff_format(self, hook_project):
+        """Multi-line edit produces unified diff format with @@ markers."""
+        old = "\n".join(f"    x{i} = {i}" for i in range(10))
+        new = "\n".join(f"    x{i} = {i * 10}" for i in range(10))
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "config.py"),
+                "old_string": old,
+                "new_string": new,
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            content = events[0].content
+            assert "@@" in content
+            assert "-" in content
+            assert "+" in content
+        finally:
+            store.close()
+
+    def test_edit_no_old_new_graceful(self, hook_project):
+        """Edit with no old_string/new_string still creates an event."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "empty.py"),
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            assert "Edited" in events[0].content
+            assert "src/empty.py" in events[0].content
+        finally:
+            store.close()
+
+    def test_write_new_file_python_symbols(self, hook_project):
+        """Write new Python file extracts class/def symbols."""
+        content = "class Foo:\n    pass\n\ndef bar():\n    pass\n"
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "new_module.py"),
+                "content": content,
+            },
+            "tool_response": {"text": "The file has been created successfully."},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            evt = events[0].content
+            assert "Created" in evt
+            assert "new_module.py" in evt
+            assert "Foo" in evt
+            assert "bar" in evt
+            assert "(5 lines)" in evt
+        finally:
+            store.close()
+
+    def test_write_overwrite_verb(self, hook_project):
+        """Write overwrite uses 'Wrote' when response doesn't say 'created'."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "existing.py"),
+                "content": "class Foo:\n    pass\n",
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            assert "Wrote" in events[0].content
+            assert "Created" not in events[0].content
+        finally:
+            store.close()
+
+    def test_write_no_content_graceful(self, hook_project):
+        """Write with missing content field gives (0 lines)."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "nocon.py"),
+            },
+            "tool_response": {},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            assert "(0 lines)" in events[0].content
+        finally:
+            store.close()
+
+    def test_write_non_code_file(self, hook_project):
+        """Write to .yaml produces line count but no symbols."""
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(hook_project / "config.yaml"),
+                "content": "key: value\nother: stuff\n",
+            },
+            "tool_response": {},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            content = events[0].content
+            assert "config.yaml" in content
+            assert "(2 lines)" in content
+        finally:
+            store.close()
+
+    def test_huge_edit_truncated(self, hook_project):
+        """Very large diff is truncated at 2000 chars with [truncated] marker."""
+        old = "\n".join(f"line_{i} = {i}" for i in range(200))
+        new = "\n".join(f"line_{i} = {i + 1}" for i in range(200))
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(hook_project / "src" / "huge.py"),
+                "old_string": old,
+                "new_string": new,
+            },
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+        store = EventStore(hook_project / ".engram" / "events.db")
+        try:
+            events = store.recent_by_type(EventType.MUTATION, limit=10)
+            assert len(events) == 1
+            assert len(events[0].content) <= 2000
+            assert "[truncated]" in events[0].content
+        finally:
+            store.close()

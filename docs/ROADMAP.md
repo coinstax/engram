@@ -52,6 +52,14 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 - Schema v5 migration (sessions table, session_id on events)
 - Consult File: `--file` flag on CLI, `start_consultation_file` MCP tool, `/consult` slash command
 
+### v1.5 (2026-02-25)
+- Context Save/Restore Integration (#8): `engram checkpoint <file>` records checkpoint and enriches markdown
+- CheckpointEngine: enriches markdown sections with matching Engram events via HTML comment markers
+- Full Briefing mode: `engram briefing --full` combines latest checkpoint static context with dynamic activity
+- Checkpoint data stored in meta table as JSON (no schema migration)
+- Auto-checkpoint via PostToolUse hook on `.claude/context/*.md` writes
+- MCP: `save_checkpoint` tool, `briefing` tool gains `full` parameter
+
 ---
 
 ## Planned
@@ -89,18 +97,7 @@ Keep the 2000-char limit — this is a summary, not a full diff.
 
 Builds on session intent (#6, shipped in v1.4) to know what agents are currently active.
 
-#### 8. Context Save/Restore Integration
-**Problem:** Context save/restore tools (e.g., Claude Code's `/tools:context-save` and `/tools:context-restore`) write static markdown snapshots to `.claude/context/`. Meanwhile, Engram already accumulates rich, structured, searchable context throughout every session — but the two systems are completely disconnected. Agents manually duplicate work that Engram already does.
-
-**Solution:** Integrate Engram as the primary backend for context save/restore:
-- **Context Save** (`engram checkpoint`): Post a `checkpoint` event (new type) summarizing session work, key decisions, current state, and next steps. Optionally still write a markdown file for offline/non-MCP access. The checkpoint event links to the session's decisions, warnings, and discoveries via `related_ids`.
-- **Context Restore** (`engram briefing` as primary): Restore calls `engram briefing` first for structured project state. Falls back to markdown files only if Engram isn't available.
-- **CLI**: `engram checkpoint --summary "Shipped v1.2, planned P0 features" --next "Implement event lifecycle"`
-- **MCP**: `save_checkpoint` tool, and `briefing` already serves as restore
-
-This closes the loop — agents that use Engram don't need a separate context persistence mechanism. The briefing *is* the restored context.
-
-Standalone — no dependencies on other features, though benefits from session intent (#6) for auto-populating checkpoint scope.
+#### ~~8. Context Save/Restore Integration~~ — Shipped in v1.5
 
 ---
 
@@ -198,7 +195,7 @@ Auto-generate CHANGELOG.md entries from git commits and event history on version
 Smarter Briefing Ranking (#12) ◄── ✅ Event Priority (#3)
                                 ◄── ✅ Event Lifecycle (#1)
 
-Context Save/Restore (#8)       ── standalone (benefits from ✅ #6)
+✅ Context Save/Restore (#8)    ── shipped v1.5
 Hierarchical Summarization (#4) ── standalone
 Richer Mutation Capture (#5)    ── standalone
 Outcome Tracking (#9)           ── standalone (uses existing related_ids)
@@ -212,8 +209,7 @@ Subscriptions (#14)             ── depends on ✅ Session Intent (#6)
 All dependencies are now shipped (✅ #1, #2, #3, #6). Remaining features can be built in any order based on impact:
 
 1. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
-2. **Context Save/Restore** (#8) — standalone, closes the context persistence gap
-3. **Conflict Detection** (#7) — all deps shipped (#6), solves multi-agent isolation
+2. **Conflict Detection** (#7) — all deps shipped (#6), solves multi-agent isolation
 4. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
 5. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
 6. **Multi-Agent Awareness** (#11) — all deps shipped (#6)

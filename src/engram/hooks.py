@@ -1,6 +1,8 @@
 """Claude Code hooks — passive observation of agent activity."""
 
+import difflib
 import json
+import re
 import time
 from pathlib import Path
 
@@ -20,6 +22,24 @@ TRIVIAL_COMMANDS = frozenset({
     "whoami", "date", "cd", "true", "false", "type", "file",
     "stat", "realpath", "dirname", "basename", "env", "printenv",
 })
+
+# Structural symbol patterns by file extension (for Write tool summaries)
+_STRUCT_PATTERNS: dict[str, re.Pattern] = {
+    ".py": re.compile(r"^(?:async\s+)?(?:class|def)\s+(\w+)"),
+    ".js": re.compile(
+        r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+        r"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\()"
+    ),
+    ".ts": re.compile(
+        r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+        r"(?:function\s+(\w+)|class\s+(\w+)|interface\s+(\w+)|type\s+(\w+)\s*=)"
+    ),
+    ".rs": re.compile(
+        r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?"
+        r"(?:fn\s+(\w+)|struct\s+(\w+)|enum\s+(\w+)|impl\s+(\w+))"
+    ),
+    ".go": re.compile(r"^func\s+(?:\([^)]+\)\s+)?(\w+)"),
+}
 
 # Hook configuration for .claude/settings.json
 HOOK_CONFIG = {
@@ -129,6 +149,100 @@ def handle_post_tool_use(stdin_data: dict, project_dir: Path) -> None:
         store.close()
 
 
+def _extract_symbols(content: str, ext: str, max_lines: int = 100) -> list[str]:
+    """Extract top-level symbol names from file content using lightweight regex."""
+    pattern = _STRUCT_PATTERNS.get(ext.lower())
+    if not pattern:
+        return []
+    symbols: list[str] = []
+    for line in content.splitlines()[:max_lines]:
+        m = pattern.match(line.strip())
+        if m:
+            name = next((g for g in m.groups() if g), None)
+            if name and name not in symbols:
+                symbols.append(name)
+    return symbols
+
+
+def _summarize_write(rel_path: str, tool_input: dict, tool_response: dict) -> str:
+    """Generate a summary for a Write tool mutation."""
+    content: str = tool_input.get("content") or ""
+    lines = content.splitlines()
+    line_count = len(lines)
+
+    # Detect new vs overwrite from tool_response
+    resp_text = ""
+    if isinstance(tool_response, dict):
+        # Claude Code may put result text in various fields
+        for key in ("text", "stdout", "message"):
+            val = tool_response.get(key, "")
+            if val and isinstance(val, str):
+                resp_text = val.lower()
+                break
+    elif isinstance(tool_response, str):
+        resp_text = tool_response.lower()
+
+    verb = "Created" if "created" in resp_text else "Wrote"
+    header = f"{verb} {rel_path} ({line_count} lines)"
+
+    ext = Path(rel_path).suffix.lower()
+    symbols = _extract_symbols(content, ext) if content else []
+
+    if symbols:
+        max_syms = 8
+        sym_str = ", ".join(symbols[:max_syms])
+        if len(symbols) > max_syms:
+            sym_str += f", +{len(symbols) - max_syms} more"
+        return f"{header}: {sym_str}"
+
+    return header
+
+
+def _summarize_edit(rel_path: str, tool_input: dict) -> str:
+    """Generate a summary for an Edit tool mutation."""
+    old_string: str = tool_input.get("old_string") or ""
+    new_string: str = tool_input.get("new_string") or ""
+    description: str = tool_input.get("description") or ""
+
+    header = f"Edited {rel_path}"
+    if description:
+        header = f"{header}: {description}"
+
+    # If no old/new strings provided, return header only
+    if not old_string and not new_string:
+        return header
+
+    old_lines = old_string.splitlines()
+    new_lines = new_string.splitlines()
+
+    # Build unified diff, strip file header lines
+    raw_diff = list(difflib.unified_diff(old_lines, new_lines, lineterm="", n=1))
+    diff_lines = [l for l in raw_diff if not l.startswith("---") and not l.startswith("+++")]
+
+    # Count purely changed lines (not context)
+    changed = [l for l in diff_lines if l.startswith("+") or l.startswith("-")]
+
+    if not changed:
+        return header
+
+    if len(changed) <= 6:
+        # Short inline format
+        removed = [l[1:].strip() for l in changed if l.startswith("-")]
+        added = [l[1:].strip() for l in changed if l.startswith("+")]
+        r_str = "; ".join(removed) if removed else ""
+        a_str = "; ".join(added) if added else ""
+        if r_str and a_str:
+            return f"{header} '{r_str}' -> '{a_str}'"
+        elif a_str:
+            return f"{header} +'{a_str}'"
+        else:
+            return f"{header} -'{r_str}'"
+    else:
+        # Compact diff format
+        diff_str = "\n".join(diff_lines)
+        return f"{header}\n{diff_str}"
+
+
 def _handle_file_mutation(tool_input: dict, stdin_data: dict,
                           project_dir: Path, store: EventStore) -> None:
     """Record a file write/edit as a mutation event."""
@@ -146,15 +260,16 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
         return
 
     session_id = stdin_data.get("session_id", "unknown")
-    content = f"Modified {rel_path}"
+    tool_name = stdin_data.get("tool_name", "")
+    tool_response = stdin_data.get("tool_response") or {}
 
-    # Add description from Edit tool if available
-    description = tool_input.get("description", "")
-    if description:
-        content = f"Modified {rel_path}: {description}"
+    if tool_name == "Edit":
+        content = _summarize_edit(rel_path, tool_input)
+    else:
+        content = _summarize_write(rel_path, tool_input, tool_response)
 
     if len(content) > 2000:
-        content = content[:2000]
+        content = content[:1988] + "\n[truncated]"
 
     # Auto-tag with active session
     agent_id = f"hook-{session_id[:8]}"
