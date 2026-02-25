@@ -305,6 +305,70 @@ def start_consultation(
 
 
 @mcp.tool()
+def start_consultation_file(
+    file_path: str,
+    models: str,
+    topic: str | None = None,
+    prompt: str | None = None,
+    system_prompt: str | None = None,
+) -> str:
+    """Start a consultation about a specific file with external AI models.
+
+    Reads the file, formats it as the initial message, and gets immediate responses.
+    Auto-assembles project context as background for the models.
+
+    Args:
+        file_path: Path to the file to consult about
+        models: Comma-separated model keys: gpt-4o, gemini-flash, claude-sonnet
+        topic: What to discuss (defaults to "Review: <filename>")
+        prompt: Custom prompt/question about the file (defaults to general review)
+        system_prompt: Optional additional context/instructions for all models
+    """
+    from engram.consult import ConsultationEngine, read_file_for_consultation, format_file_message
+    from engram.context import ContextAssembler
+
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+
+        filename, file_content = read_file_for_consultation(file_path)
+
+        if not topic:
+            topic = f"Review: {filename}"
+
+        initial_message = format_file_message(filename, file_content, prompt=prompt)
+
+        # Auto-context for file consultations
+        model_list = [m.strip() for m in models.split(",")]
+        assembler = ContextAssembler(store, project_dir=project_dir)
+        auto_context = assembler.assemble_for_consultation(
+            topic=topic, models=model_list,
+        )
+
+        if system_prompt:
+            full_system = f"{auto_context}\n\n---\n\n## Additional Instructions\n{system_prompt}"
+        else:
+            full_system = auto_context
+
+        engine = ConsultationEngine(store, project_dir=project_dir)
+        conv_id = engine.start(topic, model_list, system_prompt=full_system)
+
+        engine.add_message(conv_id, initial_message)
+        responses = engine.get_responses(conv_id)
+
+        result = f"Started consultation {conv_id}\nTopic: {topic}\nModels: {', '.join(model_list)}\n"
+        result += f"File: {filename} ({len(file_content)} chars)\n"
+        for r in responses:
+            result += f"\n--- {r['sender']} ---\n{r['content']}\n"
+
+        return result
+    except ValueError as e:
+        return f"Error: {e}"
+    finally:
+        store.close()
+
+
+@mcp.tool()
 def consult_say(
     conv_id: str,
     message: str,

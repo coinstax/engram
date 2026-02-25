@@ -532,13 +532,14 @@ def consult(ctx):
 
 
 @consult.command("start")
-@click.option("--topic", "-t", required=True, help="Conversation topic")
+@click.option("--topic", "-t", default=None, help="Conversation topic (auto-derived from filename if --file is used)")
 @click.option("--models", "-m", required=True, help="Comma-separated model keys (gpt-4o,gemini-flash,claude-sonnet)")
 @click.option("--system", "-s", default=None, help="System prompt for all models")
 @click.option("--context/--no-context", default=True, help="Auto-assemble project context (default: on)")
 @click.option("--message", "-M", default=None, help="Initial message (sends and gets responses immediately)")
+@click.option("--file", "-f", "file_path", default=None, type=click.Path(exists=True), help="File to consult about")
 @click.pass_context
-def consult_start(ctx, topic, models, system, context, message):
+def consult_start(ctx, topic, models, system, context, message, file_path):
     """Start a new consultation."""
     from engram.consult import ConsultationEngine
     from engram.context import ContextAssembler
@@ -546,6 +547,29 @@ def consult_start(ctx, topic, models, system, context, message):
     store = _get_store(project)
 
     model_list = [m.strip() for m in models.split(",")]
+
+    # Handle file input
+    if file_path:
+        from engram.consult import read_file_for_consultation, format_file_message
+        try:
+            filename, file_content = read_file_for_consultation(file_path)
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            store.close()
+            sys.exit(1)
+
+        if not topic:
+            topic = f"Review: {filename}"
+
+        # --message becomes the custom prompt; file content is always the payload
+        message = format_file_message(filename, file_content, prompt=message)
+        click.echo(f"File: {filename} ({len(file_content)} chars)")
+
+    if not topic:
+        click.echo("Error: --topic is required when --file is not provided", err=True)
+        store.close()
+        sys.exit(1)
+
     engine = ConsultationEngine(store, project_dir=project)
 
     # Auto-assemble project context
@@ -570,7 +594,7 @@ def consult_start(ctx, topic, models, system, context, message):
 
         if message:
             engine.add_message(conv_id, message)
-            click.echo(f"\n> {message}\n")
+            click.echo(f"\n> {message[:200]}{'...' if len(message) > 200 else ''}\n")
             responses = engine.get_responses(conv_id)
             for r in responses:
                 click.echo(f"--- {r['sender']} ---")

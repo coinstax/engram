@@ -13,6 +13,55 @@ from engram import providers
 # Max chars before truncating older messages (~20k tokens)
 MAX_INPUT_CHARS = 80_000
 
+# Max file size for file-based consultations (leaves headroom under MAX_INPUT_CHARS)
+MAX_FILE_CHARS = 60_000
+
+
+def read_file_for_consultation(file_path: str | Path) -> tuple[str, str]:
+    """Read a file and return (filename, content).
+
+    Raises ValueError if file not found, too large, or not valid UTF-8.
+    """
+    path = Path(file_path).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"File not found: {path}")
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as e:
+        raise ValueError(f"Cannot read file: {e}") from e
+
+    if len(content) > MAX_FILE_CHARS:
+        raise ValueError(
+            f"File too large: {len(content)} chars (max {MAX_FILE_CHARS}). "
+            f"Consider extracting the relevant section."
+        )
+
+    return path.name, content
+
+
+def format_file_message(
+    filename: str,
+    content: str,
+    prompt: str | None = None,
+) -> str:
+    """Format file content into an initial consultation message.
+
+    Args:
+        filename: Name of the file (for display and syntax detection)
+        content: Full file text
+        prompt: Custom prompt/question. Defaults to a general review request.
+    """
+    prompt = prompt or (
+        "Review this file and provide feedback. "
+        "Note any issues, suggest improvements, and highlight what works well."
+    )
+
+    suffix = Path(filename).suffix.lstrip(".")
+    lang = suffix if suffix else ""
+
+    return f"{prompt}\n\n**File: `{filename}`**\n\n```{lang}\n{content}\n```"
+
 
 class ConsultationEngine:
     """Manages multi-turn conversations with external AI models."""

@@ -8,7 +8,11 @@ import pytest
 
 from engram.models import Event, EventType
 from engram.store import EventStore
-from engram.consult import ConsultationEngine
+from engram.consult import (
+    ConsultationEngine,
+    read_file_for_consultation,
+    format_file_message,
+)
 
 
 @pytest.fixture
@@ -324,3 +328,59 @@ class TestSaveLog:
         content = log_path.read_text()
         assert "## Summary" in content
         assert "Decided to use approach A" in content
+
+
+class TestReadFileForConsultation:
+
+    def test_reads_file(self, tmp_path):
+        f = tmp_path / "example.py"
+        f.write_text("print('hello')")
+        filename, content = read_file_for_consultation(f)
+        assert filename == "example.py"
+        assert content == "print('hello')"
+
+    def test_file_not_found(self):
+        with pytest.raises(ValueError, match="File not found"):
+            read_file_for_consultation("/nonexistent/path.py")
+
+    def test_file_too_large(self, tmp_path):
+        f = tmp_path / "huge.txt"
+        f.write_text("x" * 70_000)
+        with pytest.raises(ValueError, match="File too large"):
+            read_file_for_consultation(f)
+
+    def test_binary_file(self, tmp_path):
+        f = tmp_path / "binary.bin"
+        f.write_bytes(b"\x80\x81\x82\xff\xfe")
+        with pytest.raises(ValueError, match="Cannot read file"):
+            read_file_for_consultation(f)
+
+    def test_empty_file(self, tmp_path):
+        f = tmp_path / "empty.txt"
+        f.write_text("")
+        filename, content = read_file_for_consultation(f)
+        assert filename == "empty.txt"
+        assert content == ""
+
+
+class TestFormatFileMessage:
+
+    def test_default_prompt(self):
+        msg = format_file_message("foo.py", "print(1)")
+        assert "foo.py" in msg
+        assert "```py" in msg
+        assert "print(1)" in msg
+        assert "Review this file" in msg
+
+    def test_custom_prompt(self):
+        msg = format_file_message("foo.py", "print(1)", prompt="Check for bugs")
+        assert "Check for bugs" in msg
+        assert "Review this file" not in msg
+
+    def test_markdown_file(self):
+        msg = format_file_message("spec.md", "# Title")
+        assert "```md" in msg
+
+    def test_no_extension(self):
+        msg = format_file_message("Makefile", "all: build")
+        assert "```\n" in msg
