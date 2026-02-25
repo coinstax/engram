@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.5.0 — 2026-02-25
+
+### Added
+
+- **Context Save/Restore Integration** — `engram checkpoint <file>` records a context checkpoint and enriches the markdown file with recent Engram events (decisions, warnings, discoveries) that aren't already present. Uses HTML comment markers (`<!-- engram:start -->` / `<!-- engram:end -->`) for injected content that's invisible in rendered markdown and replaceable on re-enrichment.
+- **Full briefing mode** — `engram briefing --full` combines the latest checkpoint's static context file with dynamic recent activity since the checkpoint. One command gives you the complete project picture.
+- **Checkpoint MCP tool** — `save_checkpoint` exposed via MCP server. Auto-links to active session. `briefing` tool gains `full` parameter.
+- **Checkpoint data model** — `Checkpoint` dataclass in models.py. Checkpoints stored in the meta table as JSON (no schema migration needed).
+- **Consult File feature** — `engram consult start --file <path>` includes file contents in consultation messages. `start_consultation_file` MCP tool. `/consult` slash command for quick consultations.
+
+### Stats
+
+- 260 tests across 14 test modules
+- 15 source modules
+
+---
+
 ## v1.4.0 — 2026-02-24
 
 ### Added

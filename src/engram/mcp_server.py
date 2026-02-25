@@ -135,6 +135,7 @@ def query(
 def briefing(
     scope: str | None = None,
     since: str | None = None,
+    full: bool = False,
     format: str = "compact",
 ) -> str:
     """Generate a project briefing summarizing recent activity.
@@ -144,10 +145,17 @@ def briefing(
     Args:
         scope: Filter by file path prefix (e.g., "src/auth")
         since: Time window: "24h", "7d", or ISO date (default: 7 days)
+        full: If True, combines latest checkpoint context with dynamic recent activity
         format: Output format: "compact" or "json"
     """
     store = _get_store()
     try:
+        if full:
+            from engram.checkpoint import CheckpointEngine
+            project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+            engine = CheckpointEngine(store, project_dir=project_dir)
+            return engine.restore(scope=scope, since=since)
+
         gen = BriefingGenerator(store)
         result = gen.generate(scope=scope, since=since)
         if format == "json":
@@ -260,6 +268,49 @@ def list_sessions(
         store.cleanup_stale_sessions()
         sessions = store.list_sessions(active_only=active_only)
         return format_sessions_compact(sessions)
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def save_checkpoint(
+    file_path: str,
+    agent_id: str = "claude-code",
+    enrich: bool = True,
+) -> str:
+    """Save a context checkpoint. Records that a snapshot was taken and enriches the file with recent Engram events.
+
+    The context markdown file is the primary artifact (written by the agent).
+    This tool records the checkpoint and optionally enriches the file by pulling
+    recent decisions, warnings, and discoveries from Engram into matching sections.
+
+    Args:
+        file_path: Path to the context markdown file (e.g., .claude/context/session.md)
+        agent_id: Agent identifier
+        enrich: Whether to enrich the file with Engram events (default: True)
+    """
+    from engram.checkpoint import CheckpointEngine
+    from engram.formatting import format_checkpoint_compact
+    store = _get_store()
+    try:
+        project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+
+        # Auto-link to active session
+        session_id = None
+        active = store.get_active_session(agent_id)
+        if active:
+            session_id = active.id
+
+        engine = CheckpointEngine(store, project_dir=project_dir)
+        result = engine.save(
+            file_path=file_path,
+            agent_id=agent_id,
+            enrich=enrich,
+            session_id=session_id,
+        )
+        return format_checkpoint_compact(result)
+    except ValueError as e:
+        return f"Error: {e}"
     finally:
         store.close()
 

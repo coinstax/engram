@@ -3,7 +3,7 @@
 import json
 from dataclasses import asdict
 
-from engram.models import BriefingResult, Event, Session
+from engram.models import BriefingResult, Checkpoint, Event, Session
 
 
 def _short_timestamp(ts: str) -> str:
@@ -90,6 +90,21 @@ def format_sessions_json(sessions: list[Session]) -> str:
         d = asdict(s)
         data.append(d)
     return json.dumps(data, indent=2)
+
+
+def format_checkpoint_compact(checkpoint: Checkpoint) -> str:
+    """Single-line compact format for a checkpoint."""
+    ts = _short_timestamp(checkpoint.created_at)
+    enriched = (
+        f" (enriched: {', '.join(checkpoint.enriched_sections)})"
+        if checkpoint.enriched_sections else ""
+    )
+    return f"[{checkpoint.id}] [{ts}] {checkpoint.file_path}{enriched}"
+
+
+def format_checkpoint_json(checkpoint: Checkpoint) -> str:
+    """JSON output for a checkpoint."""
+    return json.dumps(asdict(checkpoint), indent=2)
 
 
 def format_briefing_compact(briefing: BriefingResult) -> str:

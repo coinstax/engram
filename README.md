@@ -21,7 +21,7 @@ The project started as "AgentBus" (an inter-agent message bus), but after consul
 
 ## For Agents: How to Use Engram
 
-If Engram is configured as an MCP server in your environment, you have eleven tools available.
+If Engram is configured as an MCP server in your environment, you have thirteen tools available.
 
 If Claude Code hooks are installed (`engram hooks install`), file mutations and bash commands are captured automatically — you don't need to manually post `mutation` or `outcome` events.
 
@@ -163,7 +163,7 @@ Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-
 }
 ```
 
-The MCP server exposes eleven tools: `post_event`, `query`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `start_consultation`, `consult_say`, `consult_show`, `consult_done`.
+The MCP server exposes thirteen tools: `post_event`, `query`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
 
 ### Add Agent Instructions
 
@@ -201,6 +201,10 @@ This project uses Engram for persistent memory across agent sessions.
 ### Consultations (design validation)
 - Use `start_consultation` to get feedback from external AI models (GPT-4o, Gemini, etc.)
 - Continue with `consult_say`, review with `consult_show`, close with `consult_done`
+
+### Context checkpoints
+- After writing a context file: `save_checkpoint` to record it and enrich with Engram events
+- Use `briefing` with `full=True` to restore: combines checkpoint context + recent activity
 ```
 
 ### CLI Usage
@@ -236,6 +240,11 @@ engram session ls                # list active sessions
 engram session show ses-abc123   # show session details
 engram session end               # end current session
 
+# Context checkpoints
+engram checkpoint .claude/context/session.md      # record + enrich with Engram data
+engram checkpoint context.md --no-enrich          # record without enrichment
+engram briefing --full                            # restore: checkpoint + recent activity
+
 # Garbage collection
 engram gc --dry-run          # preview what would be archived
 engram gc --max-age 90       # archive mutations/outcomes older than 90 days
@@ -248,8 +257,8 @@ engram status
 
 ```
 src/engram/
-  models.py      — Event, Session, QueryFilter, BriefingResult dataclasses
-  store.py       — EventStore: SQLite + WAL + FTS5, schema migration (v1→v5), session CRUD
+  models.py      — Event, Session, Checkpoint, QueryFilter, BriefingResult dataclasses
+  store.py       — EventStore: SQLite + WAL + FTS5, schema migration (v1→v5), session + checkpoint CRUD
   query.py       — QueryEngine: relative time parsing, structured + FTS queries
   bootstrap.py   — GitBootstrapper: mines git log + README/CLAUDE.md into seed events
   briefing.py    — BriefingGenerator: 4-section briefings, focus ranking, dedup, staleness
@@ -257,10 +266,11 @@ src/engram/
   context.py     — ContextAssembler: auto-context for consultation system prompts
   hooks.py       — Claude Code hooks: passive mutation/outcome capture, session auto-registration
   gc.py          — GarbageCollector: archives old events, preserves warnings/decisions
-  cli.py         — Click CLI: init, post, query, briefing, session, resolve, supersede, reopen, gc, hooks
+  checkpoint.py  — CheckpointEngine: context save/restore integration, file enrichment
+  cli.py         — Click CLI: init, post, query, briefing, checkpoint, session, resolve, supersede, reopen, gc, hooks
   providers.py   — Multi-model provider dispatch (OpenAI, Google, Anthropic, xAI)
   consult.py     — Multi-turn consultation engine with persistent conversations
-  mcp_server.py  — FastMCP server: 11 tools (events, sessions, briefing, consultations)
+  mcp_server.py  — FastMCP server: 13 tools (events, sessions, checkpoints, briefing, consultations)
 ```
 
 **Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema v5 with automatic migration from any prior version on connection.
@@ -297,9 +307,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.3** — Event lifecycle (resolve/supersede/reopen), event priority (critical/high/normal/low), scope-aware briefings with `--focus`, 4-section briefing structure, auto-context for consultations, thinking model support
 
-**v1.4** (current) — Session intent (`engram session start/end/ls/show`), event-session linking, auto-scoped briefings from active session, stale session cleanup, hook auto-registration
+**v1.4** — Session intent (`engram session start/end/ls/show`), event-session linking, auto-scoped briefings from active session, stale session cleanup, hook auto-registration, consult file feature
 
-**Next up** — Richer mutation capture, context save/restore, hierarchical summarization, conflict detection
+**v1.5** (current) — Context save/restore integration (`engram checkpoint`, `engram briefing --full`), file enrichment with Engram events, `save_checkpoint` MCP tool
+
+**Next up** — Richer mutation capture, hierarchical summarization, conflict detection
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engram.models import Event, EventType, QueryFilter, Session
+from engram.models import Checkpoint, Event, EventType, QueryFilter, Session
 
 SCHEMA_VERSION = 5
 
@@ -585,6 +585,50 @@ class EventStore:
         sql = f"SELECT * FROM sessions WHERE {where} ORDER BY started_at DESC"
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_session(r) for r in rows]
+
+    # --- Checkpoint methods ---
+
+    @staticmethod
+    def _generate_checkpoint_id() -> str:
+        return f"chk-{uuid.uuid4().hex[:8]}"
+
+    def save_checkpoint(self, checkpoint: Checkpoint) -> Checkpoint:
+        """Save a checkpoint record to meta table."""
+        if not checkpoint.id:
+            checkpoint.id = self._generate_checkpoint_id()
+        if not checkpoint.created_at:
+            checkpoint.created_at = self._now_iso()
+        if not checkpoint.event_count_at_creation:
+            checkpoint.event_count_at_creation = self.count()
+
+        data = {
+            "id": checkpoint.id,
+            "file_path": checkpoint.file_path,
+            "agent_id": checkpoint.agent_id,
+            "created_at": checkpoint.created_at,
+            "event_count_at_creation": checkpoint.event_count_at_creation,
+            "enriched_sections": checkpoint.enriched_sections,
+            "session_id": checkpoint.session_id,
+        }
+        self.set_meta(f"checkpoint:{checkpoint.id}", json.dumps(data))
+        self.set_meta("checkpoint:latest", json.dumps(data))
+        return checkpoint
+
+    def get_latest_checkpoint(self) -> Checkpoint | None:
+        """Get the most recent checkpoint, or None."""
+        raw = self.get_meta("checkpoint:latest")
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return Checkpoint(**data)
+
+    def get_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
+        """Get a specific checkpoint by ID."""
+        raw = self.get_meta(f"checkpoint:{checkpoint_id}")
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return Checkpoint(**data)
 
     def cleanup_stale_sessions(self, timeout_hours: int = STALE_SESSION_HOURS) -> int:
         """Auto-end sessions older than timeout_hours. Returns count ended."""

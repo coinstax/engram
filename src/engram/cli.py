@@ -214,24 +214,33 @@ def query(ctx, text, event_type, scope, since, agent, related_to, limit, fmt):
 @click.option("--focus", default=None, help="Focus path for scope-aware ranking")
 @click.option("--resolved-window", default=48, type=int,
               help="Hours to show recently resolved events (default: 48)")
+@click.option("--full", is_flag=True, help="Include latest checkpoint context + dynamic activity")
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def briefing(ctx, scope, since, focus, resolved_window, fmt):
+def briefing(ctx, scope, since, focus, resolved_window, full, fmt):
     """Generate a project briefing."""
     project = ctx.obj["project"]
     store = _get_store(project)
 
-    gen = BriefingGenerator(store)
-    result = gen.generate(scope=scope, since=since, focus=focus,
-                          resolved_window_hours=resolved_window)
+    try:
+        if full:
+            from engram.checkpoint import CheckpointEngine
+            engine = CheckpointEngine(store, project_dir=project)
+            output = engine.restore(scope=scope, since=since, focus=focus)
+            click.echo(output)
+            return
 
-    if fmt == "json":
-        click.echo(format_briefing_json(result))
-    else:
-        click.echo(format_briefing_compact(result))
+        gen = BriefingGenerator(store)
+        result = gen.generate(scope=scope, since=since, focus=focus,
+                              resolved_window_hours=resolved_window)
 
-    store.close()
+        if fmt == "json":
+            click.echo(format_briefing_json(result))
+        else:
+            click.echo(format_briefing_compact(result))
+    finally:
+        store.close()
 
 
 @cli.command()
@@ -378,6 +387,51 @@ def reopen(ctx, event_id):
 
         store.update_status(event_id, "active")
         click.echo(f"Reopened: {event_id}")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    finally:
+        store.close()
+
+
+# --- Checkpoint commands ---
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--agent", "-a", default=None, help="Agent identifier")
+@click.option("--no-enrich", is_flag=True, help="Skip enrichment of context file")
+@click.option("--format", "-f", "fmt", default="compact",
+              type=click.Choice(["compact", "json"]))
+@click.pass_context
+def checkpoint(ctx, file_path, agent, no_enrich, fmt):
+    """Save a context checkpoint. Records the checkpoint and enriches the file with Engram data."""
+    from engram.checkpoint import CheckpointEngine
+    project = ctx.obj["project"]
+    store = _get_store(project)
+
+    agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
+
+    try:
+        # Auto-link to active session
+        session_id = None
+        active = store.get_active_session(agent_id)
+        if active:
+            session_id = active.id
+
+        engine = CheckpointEngine(store, project_dir=project)
+        result = engine.save(
+            file_path=file_path,
+            agent_id=agent_id,
+            enrich=not no_enrich,
+            session_id=session_id,
+        )
+
+        if fmt == "json":
+            from engram.formatting import format_checkpoint_json
+            click.echo(format_checkpoint_json(result))
+        else:
+            from engram.formatting import format_checkpoint_compact
+            click.echo(format_checkpoint_compact(result))
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)

@@ -40,6 +40,17 @@ class Session:
 
 
 @dataclass
+class Checkpoint:
+    id: str
+    file_path: str
+    agent_id: str
+    created_at: str
+    event_count_at_creation: int
+    enriched_sections: list[str] | None = None
+    session_id: str | None = None
+
+
+@dataclass
 class QueryFilter:
     text: str | None = None
     event_types: list[EventType] | None = None
