@@ -822,6 +822,42 @@ def install(ctx):
     click.echo(result["message"])
 
 
+@hooks.command()
+@click.pass_context
+def uninstall(ctx):
+    """Remove Engram hooks from .claude/settings.json (preserves other hooks)."""
+    from engram.hooks import uninstall_hooks
+    project = ctx.obj["project"]
+    result = uninstall_hooks(project)
+    click.echo(result["message"])
+
+
+@hooks.command()
+@click.pass_context
+def show(ctx):
+    """Show which Engram hooks are currently installed."""
+    from engram.hooks import show_hooks
+    project = ctx.obj["project"]
+    info = show_hooks(project)
+    click.echo(f"Settings file: {info['settings_path']}")
+    if not info.get("exists"):
+        click.echo("  (file does not exist — hooks are not installed)")
+        return
+    if info.get("error"):
+        click.echo(f"  error: {info['error']}")
+        return
+    if info["installed"]:
+        click.echo("Installed hooks:")
+        for name in info["installed"]:
+            click.echo(f"  - {name}")
+    else:
+        click.echo("No Engram hooks are installed.")
+    if info["missing"]:
+        click.echo("Missing hooks:")
+        for name in info["missing"]:
+            click.echo(f"  - {name}")
+
+
 # --- Hook handlers (internal, called by Claude Code) ---
 
 @cli.group(hidden=True)

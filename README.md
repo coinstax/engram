@@ -146,6 +146,13 @@ This writes hooks to `.claude/settings.json` that automatically:
 
 With hooks installed, agents get context automatically without manual posting.
 
+Check status or remove later with:
+
+```bash
+engram hooks show
+engram hooks uninstall
+```
+
 ### Configure as MCP Server (for Claude Code)
 
 Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-level):
@@ -312,9 +319,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.5** — Context save/restore integration (`engram checkpoint`, `engram briefing --full`), file enrichment with Engram events, `save_checkpoint` MCP tool
 
-**v1.6** (current) — Richer mutation capture: Edit tool diffs (`'old' -> 'new'` or unified diff), Write tool structural extraction (class/def names for .py, .js, .ts, .rs, .go), line counts, created/wrote distinction
+**v1.6** — Richer mutation capture: Edit tool diffs (`'old' -> 'new'` or unified diff), Write tool structural extraction (class/def names for .py, .js, .ts, .rs, .go), line counts, created/wrote distinction
 
-**Next up** — Hierarchical summarization, conflict detection
+**v1.6.1** (current) — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
+
+**Next up** — Plugin packaging (v2.0), hierarchical summarization, conflict detection
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 

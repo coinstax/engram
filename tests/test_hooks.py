@@ -9,6 +9,8 @@ from engram.hooks import (
     handle_post_tool_use,
     handle_session_start,
     install_hooks,
+    show_hooks,
+    uninstall_hooks,
     _extract_command_name,
     _extract_symbols,
     _should_debounce,
@@ -60,7 +62,7 @@ class TestFileMutationHook:
         assert len(events) == 1
         assert "src/foo.py" in events[0].content
         assert events[0].scope == ["src/foo.py"]
-        assert events[0].agent_id.startswith("hook-")
+        assert events[0].agent_id == "claude-code"
         store.close()
 
     def test_edit_tool_creates_mutation_event(self, hook_project):
@@ -271,6 +273,90 @@ class TestInstallHooks:
             if e.get("matcher") == "CustomTool"
         ]
         assert len(custom_hooks) == 1
+
+
+class TestUninstallHooks:
+
+    def test_uninstall_missing_settings_file(self, hook_project):
+        result = uninstall_hooks(hook_project)
+        assert result["status"] == "missing"
+
+    def test_uninstall_removes_engram_hooks(self, hook_project):
+        install_hooks(hook_project)
+        result = uninstall_hooks(hook_project)
+        assert result["status"] == "uninstalled"
+
+        settings = json.loads(
+            (hook_project / ".claude" / "settings.json").read_text()
+        )
+        # All Engram hooks gone; since Engram was the only occupant,
+        # the top-level "hooks" key should be removed too.
+        assert "hooks" not in settings
+
+    def test_uninstall_preserves_other_hooks(self, hook_project):
+        claude_dir = hook_project / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "settings.json").write_text(json.dumps({
+            "model": "claude-sonnet-4-6",
+            "hooks": {
+                "PostToolUse": [{
+                    "matcher": "CustomTool",
+                    "hooks": [{"type": "command", "command": "custom-script.sh"}],
+                }],
+            },
+        }))
+        install_hooks(hook_project)
+        result = uninstall_hooks(hook_project)
+        assert result["status"] == "uninstalled"
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        assert settings["model"] == "claude-sonnet-4-6"
+        # Custom hook preserved; SessionStart (Engram-only) gone entirely.
+        assert "SessionStart" not in settings["hooks"]
+        custom_hooks = [
+            e for e in settings["hooks"]["PostToolUse"]
+            if e.get("matcher") == "CustomTool"
+        ]
+        assert len(custom_hooks) == 1
+
+    def test_uninstall_when_not_installed(self, hook_project):
+        claude_dir = hook_project / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "settings.json").write_text(json.dumps({"model": "x"}))
+        result = uninstall_hooks(hook_project)
+        assert result["status"] == "not-installed"
+
+
+class TestShowHooks:
+
+    def test_show_reports_missing_when_no_settings(self, hook_project):
+        info = show_hooks(hook_project)
+        assert info["exists"] is False
+        assert info["installed"] == []
+        assert set(info["missing"]) == {"PostToolUse", "SessionStart"}
+
+    def test_show_reports_installed_hooks(self, hook_project):
+        install_hooks(hook_project)
+        info = show_hooks(hook_project)
+        assert info["exists"] is True
+        assert set(info["installed"]) == {"PostToolUse", "SessionStart"}
+        assert info["missing"] == []
+
+    def test_show_reports_not_installed_when_other_hooks_exist(self, hook_project):
+        claude_dir = hook_project / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "settings.json").write_text(json.dumps({
+            "hooks": {
+                "PostToolUse": [{
+                    "matcher": "CustomTool",
+                    "hooks": [{"type": "command", "command": "custom-script.sh"}],
+                }],
+            },
+        }))
+        info = show_hooks(hook_project)
+        assert info["exists"] is True
+        assert info["installed"] == []
+        assert set(info["missing"]) == {"PostToolUse", "SessionStart"}
 
 
 class TestAutoCheckpoint:

@@ -4,6 +4,7 @@ import pytest
 from pathlib import Path
 
 from engram.context import ContextAssembler, MAX_CONTEXT_CHARS
+from tests.conftest import ts_offset
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ class TestAssemble:
         """Critical/global warnings appear in the Critical Warnings section."""
         store.set_meta("project_name", "test-project")
         from engram.models import Event, EventType
-        store.insert(Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+        store.insert(Event(id="", timestamp=ts_offset(0),
                            event_type=EventType.WARNING, agent_id="a",
                            content="Global unscoped warning", priority="critical"))
         assembler = ContextAssembler(store, project_dir=tmp_path)

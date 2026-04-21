@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.6.1 — 2026-04-21
+
+Maintenance release: hook/packaging hygiene ahead of v2.0 plugin work. No behaviour changes to briefing, query, or consultation.
+
+### Fixed
+
+- **Consistent `agent_id` for hook-captured events** (`src/engram/hooks.py`) — `PostToolUse` handlers now tag mutation/outcome events with `agent_id="claude-code"`, matching the session registered by `SessionStart`. Previously events were tagged `hook-{session_id[:8]}`, which fragmented event history when queried by agent. The `session_id` field still disambiguates individual runs.
+- **Atomic `.claude/settings.json` writes** — `install_hooks` / `uninstall_hooks` now write via tempfile + `os.replace` so a crash mid-write can no longer corrupt the settings file. Shared `_write_json_atomic()` helper.
+- **`mcp` optional dependency upper bound** (`pyproject.toml`) — pinned to `mcp>=1.0,<2.0` in both `mcp` and `all` extras. Prevents silent breakage when MCP ships a 2.x major release.
+- **Test-fixture time rot** — `conftest.py` now exposes a `ts_offset(minutes)` helper anchored to "now minus 3 hours". Fixtures in `test_briefing.py`, `test_context.py`, `test_mcp_server.py`, and `test_store.py` switched from hardcoded `2026-02-23T...` timestamps to relative ones so the default 7-day briefing window no longer bit-rots the suite.
+
+### Added
+
+- **`engram hooks uninstall`** — removes Engram's hook entries from `.claude/settings.json`, preserves other hooks and settings, and drops empty event keys / an empty top-level `hooks` block if Engram was the only occupant.
+- **`engram hooks show`** — reports which of Engram's expected hook events (`PostToolUse`, `SessionStart`) are currently wired up in `.claude/settings.json`, plus the settings file path.
+
+### Stats
+
+- 285 tests across 14 test modules (7 new: uninstall + show coverage)
+- 15 source modules
+
+---
+
 ## v1.6.0 — 2026-02-25
 
 ### Added

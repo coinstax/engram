@@ -98,7 +98,9 @@ class TestEventStore:
         assert seeded_store.count() == 8
 
     def test_last_activity(self, seeded_store):
-        assert seeded_store.last_activity() == "2026-02-23T10:35:00+00:00"
+        from tests.conftest import ts_offset
+        # Latest seeded event is at offset=35 minutes
+        assert seeded_store.last_activity() == ts_offset(35)
 
     def test_meta_get_set(self, store):
         assert store.get_meta("foo") is None

@@ -3,6 +3,7 @@
 from engram.briefing import BriefingGenerator
 from engram.formatting import format_briefing_compact, format_briefing_json
 from engram.models import Event, EventType
+from tests.conftest import ts_offset
 import json
 
 
@@ -65,10 +66,10 @@ class TestBriefingGenerator:
         """Warning with scope that was later mutated should be flagged stale."""
         store.set_meta("project_name", "stale-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Don't touch auth", scope=["src/auth.py"]),
-            Event(id="", timestamp="2026-02-23T11:00:00+00:00",
+            Event(id="", timestamp=ts_offset(60),
                   event_type=EventType.MUTATION, agent_id="b",
                   content="Modified auth module", scope=["src/auth.py"]),
         ]
@@ -83,10 +84,10 @@ class TestBriefingGenerator:
         """Warning and mutation with different scopes should not be flagged."""
         store.set_meta("project_name", "stale-test-2")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Don't touch auth", scope=["src/auth.py"]),
-            Event(id="", timestamp="2026-02-23T11:00:00+00:00",
+            Event(id="", timestamp=ts_offset(60),
                   event_type=EventType.MUTATION, agent_id="b",
                   content="Modified database", scope=["src/db.py"]),
         ]
@@ -100,13 +101,13 @@ class TestBriefingGenerator:
         """Multiple mutations to same file within 30 min should collapse."""
         store.set_meta("project_name", "dedup-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 1", scope=["src/foo.py"]),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 2", scope=["src/foo.py"]),
-            Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+            Event(id="", timestamp=ts_offset(10),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 3", scope=["src/foo.py"]),
         ]
@@ -122,10 +123,10 @@ class TestBriefingGenerator:
         """Mutations to different files should not be collapsed."""
         store.set_meta("project_name", "dedup-test-2")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit foo", scope=["src/foo.py"]),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit bar", scope=["src/bar.py"]),
         ]
@@ -139,14 +140,14 @@ class TestBriefingGenerator:
         """Mutations with >30 min gap between consecutive edits should split."""
         store.set_meta("project_name", "window-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 1", scope=["src/foo.py"]),
-            Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+            Event(id="", timestamp=ts_offset(10),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 2", scope=["src/foo.py"]),
             # 51 min gap from Edit 2 — new window (>30 min from previous)
-            Event(id="", timestamp="2026-02-23T11:01:00+00:00",
+            Event(id="", timestamp=ts_offset(61),
                   event_type=EventType.MUTATION, agent_id="a",
                   content="Edit 3", scope=["src/foo.py"]),
         ]
@@ -164,10 +165,10 @@ class TestBriefingGenerator:
         """Mutations from different agents to the same file should not collapse."""
         store.set_meta("project_name", "agent-dedup-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.MUTATION, agent_id="agent-a",
                   content="Agent A edit", scope=["src/foo.py"]),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.MUTATION, agent_id="agent-b",
                   content="Agent B edit", scope=["src/foo.py"]),
         ]
@@ -181,10 +182,10 @@ class TestBriefingGenerator:
         """A warning without scope should never be flagged stale."""
         store.set_meta("project_name", "scopeless-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="General warning with no scope"),
-            Event(id="", timestamp="2026-02-23T11:00:00+00:00",
+            Event(id="", timestamp=ts_offset(60),
                   event_type=EventType.MUTATION, agent_id="b",
                   content="Modified something", scope=["src/anything.py"]),
         ]
@@ -198,10 +199,10 @@ class TestBriefingGenerator:
         """Stale events should appear in compact briefing output."""
         store.set_meta("project_name", "stale-output")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.DECISION, agent_id="a",
                   content="Use bcrypt", scope=["src/auth.py"]),
-            Event(id="", timestamp="2026-02-23T11:00:00+00:00",
+            Event(id="", timestamp=ts_offset(60),
                   event_type=EventType.MUTATION, agent_id="b",
                   content="Rewrote auth", scope=["src/auth.py"]),
         ]
@@ -221,10 +222,10 @@ class TestFocusBriefing:
         """Events matching focus path should appear in focus_relevant."""
         store.set_meta("project_name", "focus-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Auth warning", scope=["src/auth/login.py"]),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.DECISION, agent_id="a",
                   content="DB decision", scope=["src/db/pool.py"]),
         ]
@@ -242,11 +243,11 @@ class TestFocusBriefing:
         """Critical warnings always go to critical_warnings, not focus_relevant."""
         store.set_meta("project_name", "critical-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Critical auth issue", scope=["src/auth/login.py"],
                   priority="critical"),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Normal auth warning", scope=["src/auth/login.py"]),
         ]
@@ -264,7 +265,7 @@ class TestFocusBriefing:
         """Warnings with no scope go to critical_warnings."""
         store.set_meta("project_name", "global-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Global warning"),
         ]
@@ -280,7 +281,7 @@ class TestFocusBriefing:
         """Without --focus, no events go to focus_relevant."""
         store.set_meta("project_name", "nofocus-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.DECISION, agent_id="a",
                   content="Some decision", scope=["src/foo.py"]),
         ]
@@ -300,15 +301,15 @@ class TestPriorityBriefing:
         """Higher priority events should appear first within a section."""
         store.set_meta("project_name", "priority-test")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.DECISION, agent_id="a",
                   content="Low priority", scope=["src/foo.py"],
                   priority="low"),
-            Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+            Event(id="", timestamp=ts_offset(5),
                   event_type=EventType.DECISION, agent_id="a",
                   content="High priority", scope=["src/foo.py"],
                   priority="high"),
-            Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+            Event(id="", timestamp=ts_offset(10),
                   event_type=EventType.DECISION, agent_id="a",
                   content="Normal priority", scope=["src/foo.py"]),
         ]
@@ -325,7 +326,7 @@ class TestPriorityBriefing:
         """Priority tag should appear in compact output for non-normal events."""
         store.set_meta("project_name", "prio-output")
         events = [
-            Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+            Event(id="", timestamp=ts_offset(0),
                   event_type=EventType.WARNING, agent_id="a",
                   content="Critical issue", priority="critical"),
         ]
@@ -343,7 +344,7 @@ class TestResolvedWindow:
     def test_resolved_events_appear_in_recently_resolved(self, store):
         """Resolved events within window should appear in recently_resolved."""
         store.set_meta("project_name", "resolved-test")
-        event = Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+        event = Event(id="", timestamp=ts_offset(0),
                       event_type=EventType.WARNING, agent_id="a",
                       content="Fixed issue")
         result = store.insert(event)
@@ -359,7 +360,7 @@ class TestResolvedWindow:
     def test_resolved_events_not_in_active_sections(self, store):
         """Resolved events should not appear in critical/focus/other sections."""
         store.set_meta("project_name", "resolved-test-2")
-        event = Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+        event = Event(id="", timestamp=ts_offset(0),
                       event_type=EventType.WARNING, agent_id="a",
                       content="Resolved warning")
         result = store.insert(event)

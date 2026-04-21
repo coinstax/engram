@@ -2,7 +2,9 @@
 
 import difflib
 import json
+import os
 import re
+import tempfile
 import time
 from pathlib import Path
 
@@ -259,7 +261,6 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     if _should_debounce(project_dir, rel_path):
         return
 
-    session_id = stdin_data.get("session_id", "unknown")
     tool_name = stdin_data.get("tool_name", "")
     tool_response = stdin_data.get("tool_response") or {}
 
@@ -271,12 +272,10 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     if len(content) > 2000:
         content = content[:1988] + "\n[truncated]"
 
-    # Auto-tag with active session
-    agent_id = f"hook-{session_id[:8]}"
+    # Consistent agent_id so hook-captured events link to the session
+    # registered by SessionStart. session_id on the event disambiguates runs.
+    agent_id = "claude-code"
     active_session = store.get_active_session(agent_id)
-    if not active_session:
-        # Try the base agent ID pattern too
-        active_session = store.get_active_session("claude-code")
 
     event = Event(
         id="", timestamp="",
@@ -330,8 +329,6 @@ def _handle_bash_outcome(tool_input: dict, stdin_data: dict,
     if cmd_name in TRIVIAL_COMMANDS:
         return
 
-    session_id = stdin_data.get("session_id", "unknown")
-
     # Truncate long commands
     cmd_summary = command if len(command) <= 200 else command[:200] + "..."
     content = f"Ran: {cmd_summary}"
@@ -339,11 +336,8 @@ def _handle_bash_outcome(tool_input: dict, stdin_data: dict,
     if len(content) > 2000:
         content = content[:2000]
 
-    # Auto-tag with active session
-    agent_id = f"hook-{session_id[:8]}"
+    agent_id = "claude-code"
     active_session = store.get_active_session(agent_id)
-    if not active_session:
-        active_session = store.get_active_session("claude-code")
 
     event = Event(
         id="", timestamp="",
@@ -434,11 +428,123 @@ def install_hooks(project_dir: Path) -> dict:
             if cmd not in existing_commands:
                 settings["hooks"][event_name].append(entry)
 
-    # Write settings
     claude_dir.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    _write_json_atomic(settings_path, settings)
 
     return {
         "message": f"Engram hooks installed in {settings_path}",
         "status": "installed",
+    }
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write JSON to `path` atomically via write-then-rename in the same dir."""
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _is_engram_hook_entry(entry: dict) -> bool:
+    """An entry is Engram's if any of its hook commands mention engram."""
+    for h in entry.get("hooks", []):
+        if "engram" in h.get("command", ""):
+            return True
+    return False
+
+
+def uninstall_hooks(project_dir: Path) -> dict:
+    """Remove Engram hook entries from .claude/settings.json.
+
+    Preserves other hooks and other settings. Removes empty event keys and
+    an empty top-level "hooks" key if Engram was the only occupant.
+    """
+    settings_path = project_dir / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return {"message": "No .claude/settings.json found — nothing to uninstall.",
+                "status": "missing"}
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return {"message": f"Could not read {settings_path}: {e}", "status": "error"}
+
+    hooks_cfg = settings.get("hooks")
+    if not isinstance(hooks_cfg, dict):
+        return {"message": "No Engram hooks found.", "status": "not-installed"}
+
+    removed = 0
+    for event_name in list(hooks_cfg.keys()):
+        entries = hooks_cfg.get(event_name, [])
+        if not isinstance(entries, list):
+            continue
+        kept = [e for e in entries if not _is_engram_hook_entry(e)]
+        removed += len(entries) - len(kept)
+        if kept:
+            hooks_cfg[event_name] = kept
+        else:
+            del hooks_cfg[event_name]
+
+    if removed == 0:
+        return {"message": "No Engram hooks found.", "status": "not-installed"}
+
+    if not hooks_cfg:
+        del settings["hooks"]
+
+    _write_json_atomic(settings_path, settings)
+    return {
+        "message": f"Removed {removed} Engram hook entries from {settings_path}",
+        "status": "uninstalled",
+    }
+
+
+def show_hooks(project_dir: Path) -> dict:
+    """Report which Engram hooks are currently installed.
+
+    Returns dict with 'installed' (list of event names), 'missing' (list of
+    event names that should be installed but aren't), and 'settings_path'.
+    """
+    settings_path = project_dir / ".claude" / "settings.json"
+    expected = list(HOOK_CONFIG["hooks"].keys())
+
+    if not settings_path.exists():
+        return {
+            "settings_path": str(settings_path),
+            "installed": [],
+            "missing": expected,
+            "exists": False,
+        }
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {
+            "settings_path": str(settings_path),
+            "installed": [],
+            "missing": expected,
+            "exists": True,
+            "error": "settings.json is not valid JSON",
+        }
+
+    hooks_cfg = settings.get("hooks") or {}
+    installed = []
+    for event_name in expected:
+        entries = hooks_cfg.get(event_name, []) or []
+        if any(_is_engram_hook_entry(e) for e in entries):
+            installed.append(event_name)
+
+    return {
+        "settings_path": str(settings_path),
+        "installed": installed,
+        "missing": [e for e in expected if e not in installed],
+        "exists": True,
     }

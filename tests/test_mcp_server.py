@@ -8,6 +8,7 @@ import pytest
 
 from engram.store import EventStore
 from engram.models import Event, EventType
+from tests.conftest import ts_offset
 
 
 @pytest.fixture
@@ -24,14 +25,14 @@ def mcp_project(tmp_path):
 
     # Seed some events
     events = [
-        Event(id="", timestamp="2026-02-23T10:00:00+00:00",
+        Event(id="", timestamp=ts_offset(0),
               event_type=EventType.WARNING, agent_id="test",
               content="Don't modify the schema", scope=["src/db/schema.sql"]),
-        Event(id="", timestamp="2026-02-23T10:05:00+00:00",
+        Event(id="", timestamp=ts_offset(5),
               event_type=EventType.MUTATION, agent_id="test",
               content="Added user authentication",
               scope=["src/auth/login.ts"]),
-        Event(id="", timestamp="2026-02-23T10:10:00+00:00",
+        Event(id="", timestamp=ts_offset(10),
               event_type=EventType.DECISION, agent_id="test",
               content="Using JWT for session management",
               scope=["src/auth/"]),
