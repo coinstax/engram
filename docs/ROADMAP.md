@@ -60,9 +60,69 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 - Auto-checkpoint via PostToolUse hook on `.claude/context/*.md` writes
 - MCP: `save_checkpoint` tool, `briefing` tool gains `full` parameter
 
+### v1.6 (2026-02-25)
+- Richer Mutation Capture (#5): PostToolUse hook now produces informative summaries instead of "Modified <path>" messages
+- Edit tool: inline `'old' -> 'new'` format for short changes, compact unified diff for longer ones
+- Write tool: `Created path (N lines): Sym1, Sym2, ...` with structural symbol extraction (class/def) for `.py/.js/.ts/.rs/.go`
+- No schema migration — summaries fit inside the existing 2000-char content limit
+- Design validated via consultation conv-b21aeabe959e (GPT-4o, Gemini Flash, Grok)
+
+### v1.6.1 (2026-04-21)
+- Maintenance release, no behaviour changes to briefings, queries, or consultations
+- Consistent `agent_id="claude-code"` on all hook-captured events (previously `hook-{session_id[:8]}`)
+- Atomic `.claude/settings.json` writes via tempfile + `os.replace` (`_write_json_atomic` helper)
+- New CLI: `engram hooks uninstall` and `engram hooks show`
+- Pinned `mcp>=1.0,<2.0` in optional deps
+- Relative-timestamp test fixtures (`tests/conftest.py::ts_offset`) so the suite doesn't rot when the default briefing window shifts
+
 ---
 
 ## Planned
+
+### P0 — In Progress (branch `v1.7-plugin`)
+
+#### 17. Claude Code Plugin Packaging — v1.7.0
+
+**Problem:** Getting Engram wired into a project currently takes three manual steps: `pip install engram[mcp]`, `engram hooks install`, and adding an MCP server entry to `.claude/settings.json`. Each is a friction point; users drop off.
+
+**Solution:** Ship a Claude Code plugin bundle at `plugin/` that auto-wires the MCP server, hooks, and a set of user-invokable slash-command skills. One `/plugin install` replaces the three manual steps.
+
+**Scope (MVP):**
+
+1. **Plugin skeleton** (shipped in branch) — `.claude-plugin/plugin.json` manifest, `.mcp.json` registering `engram-mcp` with `ENGRAM_PROJECT_DIR=${PWD}`, `hooks/hooks.json` mirroring the CLI's `HOOK_CONFIG`.
+2. **MVP skill set** — five skills, each a thin wrapper over the corresponding CLI command:
+   - `/engram:briefing` — show the project briefing
+   - `/engram:post-decision` — record a decision with rationale
+   - `/engram:query` — search prior events
+   - `/engram:checkpoint-save` — explicit context checkpoint
+   - `/engram:checkpoint-restore` — load latest checkpoint via `briefing --full`
+3. **Configurable auto-checkpoint dirs** — `ENGRAM_CONTEXT_DIRS` env var replaces the hard-coded `.claude/context/` path check so other save-context tools can trigger auto-enrichment.
+4. **Version alignment** — `pyproject.toml`, `src/engram/__init__.py`, and `plugin/.claude-plugin/plugin.json` all carry `1.7.0`.
+
+**Design decisions (recorded in Engram):**
+- **v1.7.0, not v2.0** — CLI/MCP/hook APIs stay compatible. Purely additive packaging.
+- **Monorepo** — plugin ships inside the Engram repo; one release cadence.
+- **Dual-channel distribution** — `pip install engram` for the binary, Claude Code plugin for the wiring. Plugin shells out to the pip-installed `engram`/`engram-mcp` via PATH.
+- **MCP + skills coexist** — no MCP deprecation in v1.7. Skills serve user-invoked workflows; MCP serves programmatic/autonomous use. Revisit after 3–6 months of real use.
+- **Detect-and-skip existing CLI hooks** — users who ran `engram hooks install` before installing the plugin should not get duplicate events. Target behavior; exact mechanism depends on Claude Code's hook merge semantics (under test).
+- **GitHub-first distribution** — ship the plugin via repo URL, defer marketplace submission until a real-world usage period surfaces bugs.
+
+**Open items under test (Phase 2b):**
+
+1. Whether `${PWD}` expands correctly in `.mcp.json` env vars.
+2. Hook merge/dedup behavior when user `.claude/settings.json` and plugin `hooks/hooks.json` both register identical commands.
+3. Whether skills can invoke MCP tools by name (docs don't show it; current design uses Bash shell-out as the safe path).
+4. Symlink survival across plugin cache copy.
+
+These items block the final design of skills and the migration story. Results feed Phase 3 (remaining skills) and Phase 4 (release polish).
+
+**Not in v1.7:**
+- MCP deprecation
+- Subscription to new hook events (PreCompact/PostCompact, TaskCreated, etc.) — deferred to v1.8+
+- Per-subagent event capture
+- Marketplace submission
+
+---
 
 ### P1 — High
 
@@ -76,16 +136,7 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 
 Summaries are stored as special events (new type: `summary`) with links to the events they compress. Briefings use summaries for older periods, raw events for recent activity. Could use the consultation system to generate summaries via external models, or keep it heuristic-based.
 
-#### 5. Richer Mutation Capture
-**Problem:** Hooks log "wrote auth.py" but not what changed. "Modified auth.py" is far less useful than "added JWT validation, changed token expiry from 1h to 24h."
-
-**Solution:** Enhance the PostToolUse hook to:
-- Capture the `tool_input` diff when available (Write tool includes content)
-- For Edit tool, capture old_string → new_string summary
-- Auto-generate a one-line description of the change
-- Store the diff summary in the event content, file path in scope
-
-Keep the 2000-char limit — this is a summary, not a full diff.
+#### ~~5. Richer Mutation Capture~~ — Shipped in v1.6
 
 #### 7. Conflict Detection
 **Problem:** Two agents can modify the same file or make contradictory decisions without knowing. This is the "isolation" problem from Engram's README.
@@ -206,13 +257,13 @@ Subscriptions (#14)             ── depends on ✅ Session Intent (#6)
 
 ## Suggested Build Order
 
-All dependencies are now shipped (✅ #1, #2, #3, #6). Remaining features can be built in any order based on impact:
+All dependencies are now shipped (✅ #1, #2, #3, #5, #6, #8). Remaining features can be built in any order based on impact:
 
-1. **Richer Mutation Capture** (#5) — standalone, improves data quality at the source
+1. **Claude Code Plugin Packaging** (#17) — in progress, biggest UX improvement available
 2. **Conflict Detection** (#7) — all deps shipped (#6), solves multi-agent isolation
-4. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
-5. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
-6. **Multi-Agent Awareness** (#11) — all deps shipped (#6)
-7. **Smarter Briefing Ranking** (#12) — all deps shipped (#1, #2, #3, #6)
-8. **Cross-Project Knowledge** (#10) — standalone but lower urgency
-9-12. P3 items as needed
+3. **Hierarchical Summarization** (#4) — standalone, needed when event count grows
+4. **Outcome Tracking** (#9) — convention + briefing logic, no schema change
+5. **Multi-Agent Awareness** (#11) — all deps shipped (#6)
+6. **Smarter Briefing Ranking** (#12) — all deps shipped (#1, #2, #3, #6)
+7. **Cross-Project Knowledge** (#10) — standalone but lower urgency
+8-11. P3 items as needed

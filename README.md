@@ -294,6 +294,7 @@ src/engram/
 - Passive-first — hooks capture activity automatically; manual posting is for high-signal events only
 - Rich mutation capture — Edit diffs and Write structural extraction produce informative summaries, not just file paths
 - Warnings and decisions are never garbage-collected — they represent permanent project knowledge
+- Dual-channel distribution (v1.7+) — `pip install engram` for the CLI/MCP binary, Claude Code plugin for wiring. Skills and MCP tools coexist: skills for user-invoked workflows, MCP for programmatic/autonomous use.
 
 ## Design Process
 
@@ -321,9 +322,11 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.6** — Richer mutation capture: Edit tool diffs (`'old' -> 'new'` or unified diff), Write tool structural extraction (class/def names for .py, .js, .ts, .rs, .go), line counts, created/wrote distinction
 
-**v1.6.1** (current) — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
+**v1.6.1** (current release) — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
 
-**Next up** — Plugin packaging (v2.0), hierarchical summarization, conflict detection
+**v1.7.0** (in progress, branch `v1.7-plugin`) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and a set of slash-command skills (`/engram:briefing`, `/engram:post-decision`, etc.). The Python CLI stays first-class for headless/automation use. See [plugin/README.md](plugin/README.md) for the current state and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
+
+**Next after v1.7** — Hierarchical summarization, conflict detection, outcome tracking
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full prioritized roadmap with 15 planned features.
 

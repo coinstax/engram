@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — v1.7.0 (branch `v1.7-plugin`)
+
+Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` replaces the previous three-step setup (`pip install`, `engram hooks install`, manual MCP config). The Python CLI and `engram-mcp` binary remain first-class — the plugin shells out to them, keeping a single release surface for headless/automation use.
+
+### Added (in progress)
+- `plugin/.claude-plugin/plugin.json` — plugin manifest
+- `plugin/.mcp.json` — registers `engram-mcp` with `ENGRAM_PROJECT_DIR=${PWD}`
+- `plugin/hooks/hooks.json` — PostToolUse (Write/Edit/Bash) + SessionStart, mirroring CLI `HOOK_CONFIG`
+- `plugin/skills/briefing/SKILL.md` — `/engram:briefing` proof-of-bundling skill
+- `.gitignore` exception for `plugin/.mcp.json`
+
+### Planned before release
+- Remaining MVP skills: `post-decision`, `query`, `checkpoint-save`, `checkpoint-restore`
+- `ENGRAM_CONTEXT_DIRS` env var to make auto-checkpoint dirs configurable
+- Version bump to `1.7.0` across `pyproject.toml`, `src/engram/__init__.py`, `plugin/.claude-plugin/plugin.json`
+- Resolve four open design items with live plugin testing (flagged as warnings in the project's Engram store)
+
+### Not in v1.7 (deferred)
+- MCP server deprecation
+- Subscription to new hook events (PreCompact/PostCompact, TaskCreated, etc.)
+- Per-subagent event capture
+- Plugin marketplace submission
+
+---
+
 ## v1.6.1 — 2026-04-21
 
 Maintenance release: hook/packaging hygiene ahead of v2.0 plugin work. No behaviour changes to briefing, query, or consultation.
