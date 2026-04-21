@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "engram": {
+      "command": "engram-mcp",
+      "env": {
+        "ENGRAM_PROJECT_DIR": "${PWD}"
+      }
+    }
+  }
+}
