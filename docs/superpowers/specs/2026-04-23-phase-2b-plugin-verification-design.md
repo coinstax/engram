@@ -31,9 +31,20 @@ The four unknowns:
 DATE=$(date +%Y%m%d)
 mkdir /tmp/engram-plugin-test-$DATE
 cd /tmp/engram-plugin-test-$DATE
-git init -q
-touch README.md
-git add . && git commit -qm init
+touch README.md   # something harmless to Edit for hook tests
+```
+
+No `git init` — Engram doesn't require a git repo to operate.
+
+**Pre-flight: confirm no leftover U4 artifact.** Before launch, verify the test symlink from a prior run isn't still present:
+```sh
+test -e /home/cdm/engram/plugin/testlink && \
+  echo "ERROR: stale U4 test artifact — remove before starting" && exit 1
+```
+
+**Install a crash-safety trap in the launch shell** so a session abort doesn't leave the plugin tree polluted:
+```sh
+trap 'rm -f /home/cdm/engram/plugin/testlink /tmp/hooktrace-plugin /tmp/hooktrace-cli' EXIT
 ```
 
 Launch Claude Code in the sandbox:
@@ -45,7 +56,33 @@ claude --plugin-dir /home/cdm/engram/plugin
 
 **PATH note:** `engram` and `engram-mcp` are installed editable into `/home/cdm/engram/.venv/bin`. The shell that launches Claude Code must have that directory on `PATH` (either by activating the venv or exporting it explicitly). If `which engram` from the sandbox shell returns nothing, the hooks and MCP server will silently fail and every test below will appear broken.
 
-**Teardown:** `rm -rf /tmp/engram-plugin-test-$DATE`. Findings live in the real Engram DB (see "Recording" below), not in the sandbox.
+**Teardown:** `rm -rf /tmp/engram-plugin-test-$DATE`, plus the EXIT trap clears `plugin/testlink` and the hook trace files. Findings live in the real Engram DB (see "Recording" below), not in the sandbox.
+
+### Pre-test: U1-E sanity check (outside Claude Code)
+
+Before launching Claude Code, rule out the "engram-mcp ignores `ENGRAM_PROJECT_DIR`" failure mode — otherwise a later U1-A "pass" could mask a regression. This exercises the EventStore instantiation path the MCP server uses, without needing an MCP client:
+
+```sh
+rm -rf /tmp/engram-u1e-decoy
+ENGRAM_PROJECT_DIR=/tmp/engram-u1e-decoy /home/cdm/engram/.venv/bin/python -c "
+import os
+from pathlib import Path
+from engram.store import EventStore
+pd = Path(os.environ.get('ENGRAM_PROJECT_DIR', os.getcwd()))
+pd.mkdir(parents=True, exist_ok=True)
+db = pd / '.engram' / 'events.db'
+db.parent.mkdir(exist_ok=True)
+store = EventStore(db)
+_ = store.conn   # force schema init
+store.close()
+print('project_dir:', pd)
+print('db exists:', db.exists())
+"
+ls -la /tmp/engram-u1e-decoy/.engram/
+rm -rf /tmp/engram-u1e-decoy
+```
+
+Expect `project_dir: /tmp/engram-u1e-decoy` and the DB to exist at that path. If the env var is honored, engram-mcp will behave the same way inside Claude Code's MCP spawn. If the DB lands somewhere else (e.g., `$(pwd)/.engram/events.db`), stop Phase 2b and fix `engram-mcp` first — U1 branches are not interpretable until this works.
 
 ## Test matrix
 
@@ -57,9 +94,13 @@ The baseline smokes gate the unknowns. A failure here usually means "the plugin 
 
 #### S1 — Plugin loads
 
-**Probe:** After launching Claude Code with `--plugin-dir`, check for plugin errors at startup. Run `/plugin list` and confirm `engram` is listed as loaded.
+**Probe:** Launch Claude Code with `--debug --plugin-dir /home/cdm/engram/plugin 2>/tmp/claude-stderr.log` and:
 
-**Pass:** Plugin listed, no errors.
+1. Confirm nothing prefixed `error:`, `Error:`, or `plugin load failed` appears on stderr (`grep -iE 'error|failed' /tmp/claude-stderr.log` should return nothing plugin-related).
+2. Run `/plugin list`; the `engram` entry must be present with no "failed"/"error" annotation.
+3. Run `/plugin` → Errors tab (if such a UI exists in this Claude Code version) — must be empty for engram.
+
+**Pass:** All three clean.
 
 **Fail action:** **FIX**. Almost certainly a `plugin.json` schema issue. Blocker for everything downstream.
 
@@ -71,13 +112,19 @@ The baseline smokes gate the unknowns. A failure here usually means "the plugin 
 
 **Fail action:** **FIX**. Skill discovery is broken, or `allowed-tools: Bash(engram *)` syntax didn't parse. Blocker.
 
-#### S3 — MCP connects
+#### S3 — MCP connects *and resolves the right project dir*
 
-**Probe:** Run `/mcp` (or equivalent MCP status command) and confirm `engram` is listed as connected, not failed.
+This test also gates U1. A false pass here (MCP connected but pointing at the wrong dir) would cascade and make S4–S6 appear broken for the same root cause. So S3 does three things at once:
 
-**Pass:** Connected.
+**Probes (run all three, record all three):**
 
-**Fail action:** **FIX**. Most likely causes: `engram-mcp` not on PATH, or the env var issue that U1 is about to investigate — which means S3 and U1 may resolve together.
+1. **MCP connected.** Run `/mcp`; confirm `engram` is listed as connected.
+2. **Spawned cwd.** Find the running server: `ps auxf | grep engram-mcp` → note PID → `readlink /proc/<PID>/cwd`. Record the exact path.
+3. **Project dir as the server sees it.** From inside Claude Code, call the MCP tool `mcp__engram__status` and note the `project_dir` / DB path it reports. Also: `find /tmp/engram-plugin-test-$DATE ~/.claude/plugins/cache ~/.engram /home/cdm/engram -type d -name .engram -newer /tmp/engram-plugin-test-$DATE 2>/dev/null` to locate any `.engram/` dir the server just created. There should be exactly one, inside the sandbox.
+
+**Pass:** (1) connected, (2) cwd is the sandbox dir, (3) project_dir is the sandbox dir, and the `.engram/` dir scan finds exactly one match inside the sandbox.
+
+**Fail action:** **FIX**, then jump straight to U1 to pick the correct outcome branch. Do NOT proceed to S4–S6 first — they'll misdiagnose. Once U1 is fixed, re-run S3 until green, then continue.
 
 #### S4 — SessionStart hook fires
 
@@ -119,93 +166,134 @@ Expect an `outcome` event with `agent_id=claude-code`.
 
 #### U1 — `${PWD}` expansion / project dir resolution
 
-The plugin's `.mcp.json` currently sets `ENGRAM_PROJECT_DIR=${PWD}`. Docs show `${CLAUDE_PROJECT_DIR}` in hook examples but do not confirm any variable expansion in MCP env vars. Three possible outcomes:
+The plugin's `.mcp.json` currently sets `ENGRAM_PROJECT_DIR=${PWD}`. Docs show `${CLAUDE_PROJECT_DIR}` in hook examples but do not confirm any variable expansion in MCP env vars.
 
-**U1-A: `${PWD}` expands correctly.** Events land in the sandbox `.engram/events.db`. Current `.mcp.json` is fine. **No change.**
+**Diagnosis is already done by S3** (connected? spawned cwd? reported project_dir?). Read the S3 probe outputs and map them to one of the five outcomes below. Then apply the matching fix.
 
-**U1-B: `${PWD}` does not expand, but `engram-mcp` is spawned in the user's CWD.** `engram-mcp` defaults to `os.getcwd()` when the env var is unset (confirmed in `src/engram/mcp_server.py:30` and other lines). **Fix: drop the `env` block entirely from `.mcp.json`.** Simpler than today.
+**U1-A: `${PWD}` expands to the sandbox dir.** S3 project_dir = sandbox. **No change.**
 
-**U1-C: `${PWD}` does not expand AND `engram-mcp` is spawned from the plugin cache directory.** Need a replacement. Try in order:
-  1. `${CLAUDE_PROJECT_DIR}` as the env value.
-  2. If that also doesn't work, ship a shell wrapper at `plugin/bin/engram-mcp-wrapper` (bash script that captures `$PWD` and execs `engram-mcp`). Update `.mcp.json` to use `${CLAUDE_PLUGIN_ROOT}/bin/engram-mcp-wrapper`.
+**U1-B: `${PWD}` does not expand, but `engram-mcp` was spawned in the user's CWD.** S3: project_dir literally reads `${PWD}` (unexpanded) OR `engram-mcp` logs an error about that path. `engram-mcp` would default to `os.getcwd()` if we removed the env var (confirmed in `src/engram/mcp_server.py:30`). **Fix: drop the `env` block entirely from `.mcp.json`.** Simpler than today.
 
-**Probes (run both to disambiguate):**
-- Where did events.db land? `ls -la /tmp/engram-plugin-test-$DATE/.engram/` — if missing, check `~/` or the plugin cache for a stray `.engram/` dir.
-- Where was `engram-mcp` spawned? `ps auxf | grep engram-mcp` → note the PID → `readlink /proc/<pid>/cwd`.
+**U1-C: `${PWD}` does not expand AND `engram-mcp` is spawned from the plugin cache directory.** S3: spawned cwd = `~/.claude/plugins/cache/...`, project_dir literal `${PWD}` or that same cache path. Need a replacement. Try in order:
+  1. `${CLAUDE_PROJECT_DIR}` as the env value (redeploy, re-test S3).
+  2. If that also doesn't work, ship a shell wrapper at `plugin/bin/engram-mcp-wrapper` (bash script that reads `$CLAUDE_PROJECT_DIR` or derives CWD and execs `engram-mcp`). Update `.mcp.json` to use `${CLAUDE_PLUGIN_ROOT}/bin/engram-mcp-wrapper`.
 
-**Fail action:** **FIX**. Try U1-B's drop-the-env-block approach first (simplest); if that doesn't work, fall through to U1-C's variants. Re-run S3+S4+S5 after each change until green.
+**U1-D: `${PWD}` expands, but to the wrong value.** S3: project_dir is a *real* path but not the sandbox (e.g., the user's `$HOME`, the plugin cache, or the directory Claude was launched from if Claude internally changed cwd). This is the subtle one — it would produce a working plugin that silently writes to the wrong DB. Fix: same as U1-C — switch to `${CLAUDE_PROJECT_DIR}` (which is documented to always be the user's project root for hooks; test if it's available in MCP env vars too). Wrapper is the fallback.
+
+**U1-E: engram-mcp ignores the env var.** The pre-test (sandbox setup → U1-E sanity check) should have ruled this out before launch. If the pre-test passed and S3 still shows the wrong project_dir, U1-E isn't the cause — skip. If the pre-test failed, stop Phase 2b and fix `engram-mcp` first.
+
+**Fail action:** **FIX**. After each `.mcp.json` change, fully restart Claude Code (not `/reload-plugins` — plugin manifest changes need a fresh launch) and **re-run the full S1–S6 sequence**, not just S3. A change that fixes S3 could regress S1, S2, or S6 (e.g., a wrapper script with the wrong shebang fails silently at startup). Loop until S1–S6 are all green in the final state.
 
 #### U2 — Hook dedup with CLI-installed hooks
 
+**Why the naive approach doesn't work:** counting `event_type='mutation'` rows before/after an edit is unreliable because (a) Claude may issue multiple tool_use blocks per logical edit, (b) a hypothetical dedup-by-payload in the store would hide true double-firing, (c) if the two hook invocations race on SQLite WAL, one could drop. The DB is downstream of too many layers to trust as the signal.
+
+**Instead: count trace-file lines written by distinguishable hook signatures.**
+
 **Probe:**
+
 1. Exit Claude Code.
-2. In the sandbox, run `engram hooks install` (this writes `.claude/settings.json` with the same PostToolUse commands the plugin registers).
-3. Relaunch with `--plugin-dir /home/cdm/engram/plugin`.
-4. Ask Claude to make exactly one edit to README.md.
-5. Count PostToolUse mutation events from that single edit (capture a baseline first, then diff):
-```sh
-# Before the edit:
-sqlite3 .engram/events.db "SELECT COUNT(*) FROM events WHERE event_type='mutation';"
-# After the edit:
-sqlite3 .engram/events.db "SELECT COUNT(*) FROM events WHERE event_type='mutation';"
-```
-The diff between the two counts tells us how many hook invocations fired per edit.
+2. Truncate trace files: `: > /tmp/hooktrace-plugin; : > /tmp/hooktrace-cli`.
+3. Temporarily edit `plugin/hooks/hooks.json` so the PostToolUse Edit hook wraps the engram call:
+   ```
+   "command": "sh -c 'echo plugin >> /tmp/hooktrace-plugin; engram hook post-tool-use'"
+   ```
+4. In the sandbox, run `engram hooks install`, then manually edit the written `.claude/settings.json` so its PostToolUse Edit hook also wraps distinguishably:
+   ```
+   "command": "sh -c 'echo cli >> /tmp/hooktrace-cli; engram hook post-tool-use'"
+   ```
+5. Relaunch with `--plugin-dir /home/cdm/engram/plugin`.
+6. Ask Claude to make exactly one edit to README.md. Wait for completion.
+7. Inspect traces:
+   ```sh
+   echo plugin: $(wc -l < /tmp/hooktrace-plugin)
+   echo cli:    $(wc -l < /tmp/hooktrace-cli)
+   ```
 
-**Pass (dedup):** count diff is 1. Claude Code merges identical hooks.
+**Outcome table:**
 
-**Fail (double-fire):** count diff is 2. Both sources fire independently.
+| plugin trace | cli trace | Interpretation |
+|---|---|---|
+| 1 | 0 | Plugin hook wins; CLI hook suppressed (dedup by source preference) |
+| 0 | 1 | CLI hook wins; plugin hook suppressed |
+| 1 | 1 | **Double-fire** — both sources invoke independently |
+| 0 | 0 | Neither fired — misconfiguration; investigate before interpreting |
+| ≥2 in either | | Claude issued multiple tool_use blocks for one edit; divide by N or simplify the edit prompt |
 
-**Action:** **DEFER**. Record whichever outcome. If double-fire: the v1.7.0 release notes must warn users to uninstall CLI hooks first (`engram hooks uninstall`), and Phase 4 should teach the CLI installer to detect plugin presence. If dedup: the zero-friction migration path we assumed is real.
+**Cleanup after U2:** revert `plugin/hooks/hooks.json` (git checkout or manual restore) and run `engram hooks uninstall` in the sandbox. Truncate the trace files.
+
+**Action:** **DEFER**. Record the outcome in Engram. If double-fire: release notes must warn users to uninstall CLI hooks first, and Phase 4 should teach the CLI installer to detect plugin presence. If one-source-wins: record which, because that determines which install path is canonical.
 
 #### U3 — Skill can pre-approve an MCP tool
 
-Currently, `plugin/skills/briefing/SKILL.md` uses `allowed-tools: Bash(engram briefing*)` and shells out via `!` execution. We want to know whether a skill can directly pre-approve an MCP tool (avoiding shell-out overhead and keeping things "more native").
+`allowed-tools` in a skill frontmatter is *not* the same thing as the user-facing permission prompt. The prompt is gated by `.claude/settings.json` `permissions.allow` (or the session allowlist). `allowed-tools` controls what the skill itself is permitted to invoke — a different axis. So U3 tests three orthogonal questions:
+
+- **Q1 (loading):** Does a skill with `allowed-tools: mcp__engram__status` in its frontmatter load without parse error?
+- **Q2 (resolution):** When the skill runs, can Claude resolve and invoke the MCP tool `mcp__engram__status`?
+- **Q3 (prompt suppression):** Does `allowed-tools` alone suppress the user-facing permission prompt, or is a `permissions.allow` entry in `.claude/settings.json` also required?
 
 **Probe:**
-1. In `/home/cdm/engram/plugin/skills/`, create a throwaway skill `test-mcp/SKILL.md`:
+
+1. Create `plugin/skills/test-mcp/SKILL.md`:
    ```markdown
    ---
    name: test-mcp
-   description: Test whether a skill can pre-approve an MCP tool call without a permission prompt.
+   description: Test whether a skill can invoke an MCP tool.
    allowed-tools: mcp__engram__status
    ---
 
    Run the Engram MCP status tool and show the result.
    ```
-2. In the live sandbox session, run `/reload-plugins` (or exit + relaunch).
-3. Invoke `/engram:test-mcp`.
-4. Observe: does Claude call `mcp__engram__status` without a permission prompt? Does the skill load without frontmatter error?
+2. **Exit Claude Code completely, then relaunch** with `--plugin-dir`. Do not rely on `/reload-plugins` — it is under-documented and may cache the plugin manifest from launch. A full relaunch is the documented way to pick up a new skill.
+3. Ensure `.claude/settings.json` in the sandbox has NO `permissions.allow` entry for `mcp__engram__status` (should already be clean; verify with `cat .claude/settings.json | grep -i engram_status`).
+4. Invoke `/engram:test-mcp`. Observe:
+   - Q1: did the slash command appear in completion (skill loaded)?
+   - Q2: did Claude attempt to call `mcp__engram__status`?
+   - Q3: did a permission prompt appear before the call?
+5. **Exit and relaunch**, this time after adding `mcp__engram__status` to `permissions.allow` in the sandbox `.claude/settings.json`. Re-invoke `/engram:test-mcp` and observe the Q3 axis again.
 
-**Pass:** Skill loads; MCP tool runs without prompt.
+**Outcomes to record** (any combination possible):
 
-**Fail modes:** (a) frontmatter parse error at load; (b) skill loads but prompts for permission on the MCP tool.
+- Q1 fail (skill didn't load): `allowed-tools` frontmatter syntax doesn't accept MCP tool names as written. The Bash shell-out path in the current briefing skill is unaffected.
+- Q1 pass + Q2 fail: skill loaded but the MCP tool name isn't recognized in this context.
+- Q1 pass + Q2 pass + Q3 (prompt suppressed without `permissions.allow`): `allowed-tools` alone is sufficient — cleanest outcome for native MCP invocation.
+- Q1 pass + Q2 pass + Q3 (prompt only suppressed when `permissions.allow` is also present): native invocation requires both mechanisms. Usable, but we'd also need to ship a `permissions.allow` recommendation.
+- Q1 pass + Q2 pass + Q3 (prompt fires even with `permissions.allow`): unusable for native invocation — Bash shell-out remains the only path.
 
-**Action:** **DEFER**. Current briefing skill uses Bash shell-out, which is unaffected by this result. Record the outcome. Remove `plugin/skills/test-mcp/` at end of session regardless of result.
+**Cleanup:** remove `plugin/skills/test-mcp/` after recording. Remove the `permissions.allow` test entry from sandbox settings.
+
+**Action:** **DEFER**. Current `briefing` skill uses Bash shell-out, which is unaffected regardless of outcome. Record the outcome matrix as a discovery; Phase 4 (or v1.8) decides whether to switch any skills to native MCP invocation.
 
 #### U4 — Symlink survival in plugin cache
 
 Docs claim symlinks are preserved across the plugin install (which copies the plugin directory into `~/.claude/plugins/cache/{id}/{version}/`). Untested for our case.
 
 **Probe:**
-1. Create a symlink inside the plugin: `ln -s ../README.md /home/cdm/engram/plugin/testlink`.
-2. Commit nothing — we'll remove it after.
-3. In the sandbox session, run `/reload-plugins` (or exit + relaunch with `--plugin-dir`).
-4. Check the installed copy:
+1. Pre-check (belt + braces over the sandbox-setup pre-check): verify no stale testlink — `test -e /home/cdm/engram/plugin/testlink && echo STALE && exit 1`.
+2. Create a symlink inside the plugin: `ln -s ../README.md /home/cdm/engram/plugin/testlink`.
+3. **Caveat about `--plugin-dir`:** dev mode may run the plugin directly from the source directory without copying into `~/.claude/plugins/cache/`. Before testing, snapshot the cache: `find ~/.claude/plugins/cache -maxdepth 4 -name '*engram*' 2>/dev/null` — if nothing matches, dev mode is in-place and the symlink question is moot (nothing gets copied, so survival is trivial). In that case, perform a real install via `/plugin install <local-path>` or `claude plugin install` (whichever the in-session UI supports) to exercise the cache-copy path.
+4. **Exit Claude Code and relaunch** with `--plugin-dir`. Do not rely on `/reload-plugins` here either — for plugin filesystem changes the cache copy only re-runs at a cold start. (If `/reload-plugins` later proves to pick up file changes, we can revisit, but the safe path is a full relaunch.)
+5. Check the installed copy:
 ```sh
 find ~/.claude/plugins/cache -name testlink -exec ls -la {} \;
 ```
 (The cache path layout is `~/.claude/plugins/cache/{id}/{version}/` but the exact layout isn't worth memorizing — `find` is more robust.)
 
 **Outcomes:**
-- Still a symlink → preserved (pass).
+- Cache has no engram dir at all (dev mode bypasses cache) → record this as the finding and skip the symlink question.
+- Still a symlink in cache → preserved (pass).
 - Regular file with content of target → copied-through (acceptable for many uses but breaks dynamic targets).
-- Missing → not preserved.
+- Missing from cache → not preserved.
 
-**Action:** **DEFER**. We don't currently use symlinks in the plugin. Record the finding for future reference. Remove the test symlink (`rm /home/cdm/engram/plugin/testlink`) before finishing.
+**Cleanup:** `rm /home/cdm/engram/plugin/testlink`. The EXIT trap installed at sandbox setup will also remove it if the session aborts, but do it explicitly so we don't depend on the trap firing.
+
+**Action:** **DEFER**. We don't currently use symlinks in the plugin. Record the finding for future reference.
 
 ## Recording findings
 
 Every test result flows back into the real Engram DB (not the sandbox DB — the real one at `/home/cdm/engram/.engram/events.db`).
+
+**Capture the Claude Code version first:** run `claude --version` and record the output. Every discovery posted below MUST include this version in its body (e.g., "observed 2026-04-23 with Claude Code vX.Y.Z"). Plugin behavior like `${PWD}` expansion, hook merge semantics, and permission-prompt gating are harness-version-dependent facts; a discovery without a version stamp rots silently the next time Claude Code ships.
 
 ### Resolving existing HIGH warnings
 
@@ -241,13 +329,21 @@ For any plugin code change triggered by U1's outcome, post a decision:
 
 Phase 2b is complete when ALL of the following hold:
 
-- [ ] All six baseline smokes (S1–S6) pass.
-- [ ] U1 is resolved: either U1-A (no change needed) or U1-B/C (fix applied and re-tested — S3, S4, S5 still pass after the fix).
+- [ ] All six baseline smokes (S1–S6) pass **in the final state** (i.e., after any U1 fix is applied and the plugin relaunched — not just the first time through).
+- [ ] U1 is resolved (one of A–E picked, with any fix applied and verified via the full S1–S6 re-run).
 - [ ] U2, U3, U4 findings are recorded as Engram discoveries (or warnings if a divergence was serious enough to warrant one).
-- [ ] All four HIGH "UNVERIFIED" warnings from 2026-04-21 are resolved.
+- [ ] All four HIGH "UNVERIFIED" warnings from 2026-04-21 are resolved in Engram.
+- [ ] Every posted discovery includes the Claude Code version observed.
+- [ ] No stray `.engram/` directories exist outside the sandbox. Verify with:
+  ```sh
+  find /home /tmp ~/.claude -maxdepth 6 -type d -name .engram 2>/dev/null
+  ```
+  The only matches should be `/home/cdm/engram/.engram` (the real project DB) and `/tmp/engram-plugin-test-$DATE/.engram` (the sandbox, about to be torn down). Anything else — especially under `~/.claude/plugins/cache/...` or `$HOME/.engram` — means a U1 fallback silently wrote to the wrong place and needs investigation before closing Phase 2b.
 - [ ] `docs/ROADMAP.md#17` is updated to reflect Phase 2b outcomes.
 - [ ] Sandbox `/tmp/engram-plugin-test-$DATE` is torn down.
-- [ ] Throwaway test skill `plugin/skills/test-mcp/` and test symlink `plugin/testlink` are removed.
+- [ ] Throwaway test skill `plugin/skills/test-mcp/` and test symlink `plugin/testlink` are removed (trap + explicit `rm` in the procedure).
+- [ ] `plugin/hooks/hooks.json` reverted to its committed state (U2 wrapped it temporarily).
+- [ ] Trace files `/tmp/hooktrace-plugin` and `/tmp/hooktrace-cli` removed.
 
 When all gates pass, Phase 3 (remaining MVP skills: `post-decision`, `query`, `checkpoint-save`, `checkpoint-restore`) can proceed on the same branch.
 
