@@ -107,14 +107,19 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 - **Detect-and-skip existing CLI hooks** — users who ran `engram hooks install` before installing the plugin should not get duplicate events. Target behavior; exact mechanism depends on Claude Code's hook merge semantics (under test).
 - **GitHub-first distribution** — ship the plugin via repo URL, defer marketplace submission until a real-world usage period surfaces bugs.
 
-**Open items under test (Phase 2b):**
+**Phase 2b — verification results (completed 2026-04-23, Claude Code 2.1.118):**
 
-1. Whether `${PWD}` expands correctly in `.mcp.json` env vars.
-2. Hook merge/dedup behavior when user `.claude/settings.json` and plugin `hooks/hooks.json` both register identical commands.
-3. Whether skills can invoke MCP tools by name (docs don't show it; current design uses Bash shell-out as the safe path).
-4. Symlink survival across plugin cache copy.
+1. **`${PWD}` expansion in `.mcp.json` env vars** — ✓ VERIFIED. Expands to the user's CWD. Current `plugin/.mcp.json` is correct; no code change needed.
+2. **Hook merge/dedup** — ✗ DOUBLE-FIRE. When plugin hooks and `.claude/settings.json` CLI hooks both register `Write|Edit`, both fire per edit. Engram's internal 5s debounce (hooks.py:261) prevents duplicate events in the DB, so no data corruption — but every tool use pays 2x hook-spawn latency. **Action for v1.7.0 release notes:** users who previously ran `engram hooks install` must run `engram hooks uninstall` before installing the plugin. Phase 4 should teach the CLI installer to detect plugin presence.
+3. **Skills can pre-approve MCP tools** — ✓ VERIFIED. `allowed-tools: mcp__engram__<tool>` in SKILL.md frontmatter alone suppresses the permission prompt (no `permissions.allow` entry required). Plugin skills can use native MCP invocation. Current `plugin/skills/briefing/SKILL.md` still uses Bash shell-out; candidate for migration in Phase 4 or v1.8.
+4. **Symlink survival across plugin cache copy** — ⚠ N/A for dev mode. `claude --plugin-dir` runs the plugin in-place and does not copy files into `~/.claude/plugins/cache/`. Symlink survival for production install (marketplace or `/plugin install`) remains untested; deferred beyond Phase 2b.
 
-These items block the final design of skills and the migration story. Results feed Phase 3 (remaining skills) and Phase 4 (release polish).
+**Phase 2b — new findings (not in original four):**
+
+5. **Onboarding gap: plugin does not auto-init.** A user installing the plugin and invoking `/engram:briefing` or `mcp__engram__status` gets "Engram not initialized" until they manually run `engram init`. Needs a decision before v1.7.0 release: (A) document manual init in plugin README/skill, (B) SessionStart hook auto-inits without git seeding, (C) SessionStart hook runs full `engram init`. Recorded as HIGH discovery in Engram.
+6. **Ambient `engram-mcp` duplicate process observed.** Alongside the plugin's engram-mcp, a second engram-mcp spawns without CLAUDE_PLUGIN env vars. Non-blocking (non-hook context). Source untraced. Worth fixing for release polish so setup isn't confusing.
+
+Full details and decisions in Engram (scope `plugin/`, 2026-04-23 discoveries) and in `docs/superpowers/specs/2026-04-23-phase-2b-plugin-verification-design.md`.
 
 **Not in v1.7:**
 - MCP deprecation
