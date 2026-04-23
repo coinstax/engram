@@ -10,7 +10,7 @@ from engram.models import Event, EventType
 from engram.store import EventStore
 from engram.query import QueryEngine, parse_event_types
 from engram.briefing import BriefingGenerator
-from engram.bootstrap import GitBootstrapper
+from engram.init import perform_init
 from engram.formatting import (
     format_compact, format_json,
     format_briefing_compact, format_briefing_json,
@@ -93,43 +93,22 @@ def cli(ctx, project):
 def init(ctx, max_commits):
     """Initialize Engram in this project. Seeds from git history."""
     project = ctx.obj["project"]
-    engram_dir = project / ENGRAM_DIR
 
-    if engram_dir.exists():
+    result = perform_init(project, max_commits=max_commits)
+
+    if result.already_initialized:
         click.echo(f"Engram already initialized in {project}")
         return
 
-    engram_dir.mkdir(parents=True)
-    db_path = engram_dir / DB_NAME
-    store = EventStore(db_path)
-    store.initialize()
-
-    # Detect project name and bootstrap from git
-    event_count = 0
-    try:
-        bootstrapper = GitBootstrapper(project)
-        project_name = bootstrapper.detect_project_name()
-        store.set_meta("project_name", project_name)
-
-        events = bootstrapper.mine_history(max_commits=max_commits)
-        if events:
-            event_count = store.insert_batch(events)
-    except ValueError:
-        # Not a git repo — still initialize, just without seed data
-        project_name = project.name
-        store.set_meta("project_name", project_name)
-
-    from datetime import datetime, timezone
-    store.set_meta("initialized_at", datetime.now(timezone.utc).isoformat())
-
-    click.echo(f"Engram initialized for '{project_name}'. {event_count} events seeded from git history.")
-
-    # Auto-write CLAUDE.md
+    click.echo(
+        f"Engram initialized for '{result.project_name}'. "
+        f"{result.events_seeded} events seeded from git history."
+    )
     claude_msg = _auto_write_claude_md(project)
     click.echo(claude_msg)
-    click.echo("Run 'engram hooks install' to enable passive observation via Claude Code hooks.")
-
-    store.close()
+    click.echo(
+        "Run 'engram hooks install' to enable passive observation via Claude Code hooks."
+    )
 
 
 @cli.command()
