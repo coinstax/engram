@@ -10,6 +10,8 @@ Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` 
 - `plugin/hooks/hooks.json` — PostToolUse (Write/Edit/Bash) + SessionStart, mirroring CLI `HOOK_CONFIG`
 - `plugin/skills/briefing/SKILL.md` — `/engram:briefing` proof-of-bundling skill
 - `.gitignore` exception for `plugin/.mcp.json`
+- **Plugin auto-init on SessionStart** — when the Engram Claude Code plugin is installed into a project that has not yet been initialized, the SessionStart hook now runs the equivalent of `engram init` automatically (creating `.engram/`, seeding from git history, setting project meta) so `/engram:briefing` and the MCP tools work on first launch. CLAUDE.md is intentionally not modified from the plugin path — agent guidance is already delivered via the FastMCP `instructions` field and plugin SKILL.md frontmatter.
+- `src/engram/init.py` — shared `perform_init()` helper extracted from the `engram init` CLI; used by both the CLI command and the SessionStart hook.
 
 ### Planned before release
 - Remaining MVP skills: `post-decision`, `query`, `checkpoint-save`, `checkpoint-restore`

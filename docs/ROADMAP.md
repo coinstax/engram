@@ -116,7 +116,7 @@ Comprehensive feature roadmap from the perspective of an AI agent that uses Engr
 
 **Phase 2b — new findings (not in original four):**
 
-5. **Onboarding gap: plugin does not auto-init.** A user installing the plugin and invoking `/engram:briefing` or `mcp__engram__status` gets "Engram not initialized" until they manually run `engram init`. Needs a decision before v1.7.0 release: (A) document manual init in plugin README/skill, (B) SessionStart hook auto-inits without git seeding, (C) SessionStart hook runs full `engram init`. Recorded as HIGH discovery in Engram.
+5. **Onboarding gap resolved (2026-04-23, Option C-lite).** SessionStart hook now auto-runs init when `.engram/events.db` is missing: creates the DB, seeds from git history, sets meta. CLAUDE.md is intentionally left alone — the plugin carries agent guidance via the FastMCP `instructions` field (`src/engram/mcp_server.py:21-25`) and SKILL.md frontmatter, making the CLAUDE.md snippet redundant in the plugin path. Manual `engram init` (CLI) retains full behavior including the CLAUDE.md auto-write, since the user explicitly asked for it. See `src/engram/init.py` for the shared helper.
 6. **Ambient `engram-mcp` duplicate process observed.** Alongside the plugin's engram-mcp, a second engram-mcp spawns without CLAUDE_PLUGIN env vars. Non-blocking (non-hook context). Source untraced. Worth fixing for release polish so setup isn't confusing.
 
 Full details and decisions in Engram (scope `plugin/`, 2026-04-23 discoveries) and in `docs/superpowers/specs/2026-04-23-phase-2b-plugin-verification-design.md`.

@@ -43,6 +43,12 @@ engram hooks uninstall
 
 before enabling the plugin, to avoid duplicate event capture. (The v1.7.0 release notes will document whether Claude Code dedupes hook entries automatically; until then, treat manual uninstall as required.)
 
+## First run
+
+On first launch in a project that has no `.engram/` directory, the plugin's SessionStart hook initializes Engram automatically: creates `.engram/events.db`, seeds events from the last 100 git commits, and registers a session. The first briefing announces this with a one-line banner.
+
+The plugin does **not** modify your `CLAUDE.md`. Agent-facing guidance is delivered through the MCP server's `instructions` field and the plugin's SKILL.md files. If you want the `CLAUDE.md` snippet (for non-plugin or headless use), run `engram init` manually **before** the first plugin launch — once `.engram/` exists, subsequent `engram init` runs short-circuit with "already initialized" and do not modify CLAUDE.md.
+
 ## Current state
 
 Skills shipping today:
