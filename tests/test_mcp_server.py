@@ -163,6 +163,55 @@ class TestMCPTools:
         assert "Linked outcome" not in result
 
 
+class TestMCPAutoInit:
+    """MCP tools must auto-init if invoked before SessionStart fires,
+    mirroring the hook behavior so the plugin's two entry points agree."""
+
+    def test_get_store_auto_inits_missing_db(self, tmp_path):
+        from engram.mcp_server import _get_store
+
+        old_env = os.environ.get("ENGRAM_PROJECT_DIR")
+        os.environ["ENGRAM_PROJECT_DIR"] = str(tmp_path)
+        try:
+            store = _get_store()
+            try:
+                assert (tmp_path / ".engram" / "events.db").exists()
+                assert store.get_meta("project_name") is not None
+            finally:
+                store.close()
+            # CLAUDE.md invariant — same as the hook path.
+            assert not (tmp_path / "CLAUDE.md").exists()
+        finally:
+            if old_env is None:
+                del os.environ["ENGRAM_PROJECT_DIR"]
+            else:
+                os.environ["ENGRAM_PROJECT_DIR"] = old_env
+
+    def test_get_store_auto_init_failure_raises_filenotfound(self, tmp_path, monkeypatch):
+        """If perform_init fails, the legacy FileNotFoundError surfaces —
+        user experience matches the pre-auto-init behavior for error cases."""
+        from engram import mcp_server
+
+        def boom(_project_dir):
+            raise OSError("simulated filesystem denial")
+
+        # mcp_server imports perform_init lazily inside _get_store, so patch
+        # the init module directly.
+        from engram import init as init_mod
+        monkeypatch.setattr(init_mod, "perform_init", boom)
+
+        old_env = os.environ.get("ENGRAM_PROJECT_DIR")
+        os.environ["ENGRAM_PROJECT_DIR"] = str(tmp_path)
+        try:
+            with pytest.raises(FileNotFoundError, match="Engram not initialized"):
+                mcp_server._get_store()
+        finally:
+            if old_env is None:
+                del os.environ["ENGRAM_PROJECT_DIR"]
+            else:
+                os.environ["ENGRAM_PROJECT_DIR"] = old_env
+
+
 class TestMCPConsultation:
 
     def test_start_consultation(self, mcp_project):

@@ -4,6 +4,7 @@ import difflib
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -369,10 +370,16 @@ def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
                     f"Engram initialized for '{init_result.project_name}'. "
                     f"{init_result.events_seeded} events seeded from git history.\n\n"
                 )
-        except Exception:
+        except Exception as e:
             # Filesystem, SQLite, or other init failure — fail quiet so
             # the session still starts. Matches the non-fatal hook pattern
             # used elsewhere in this module (e.g. _maybe_auto_checkpoint).
+            # One stderr line so the user has something searchable.
+            print(
+                f"engram: auto-init failed ({e.__class__.__name__}), "
+                f"session starting without memory",
+                file=sys.stderr,
+            )
             return ""
 
     store = _get_store(project_dir)

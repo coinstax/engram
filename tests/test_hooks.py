@@ -247,9 +247,10 @@ class TestSessionStartHook:
         # with the init announcement rather than the briefing header.
         assert output.lower().startswith("engram initialized for")
 
-    def test_session_start_init_failure_returns_empty(self, tmp_path, monkeypatch):
+    def test_session_start_init_failure_returns_empty(self, tmp_path, monkeypatch, capsys):
         # If perform_init raises (filesystem denial, SQLite error, etc.)
-        # the hook must fail quiet so the session still starts.
+        # the hook must fail quiet so the session still starts, and emit
+        # a one-line stderr diagnostic so the user has something to search.
         from engram import hooks
 
         def boom(_project_dir):
@@ -264,6 +265,10 @@ class TestSessionStartHook:
 
         assert output == ""
         assert not (tmp_path / ".engram" / "events.db").exists()
+
+        captured = capsys.readouterr()
+        assert "engram: auto-init failed" in captured.err
+        assert "OSError" in captured.err
 
 
 class TestInstallHooks:

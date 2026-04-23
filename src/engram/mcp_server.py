@@ -26,14 +26,27 @@ mcp = FastMCP("engram", instructions=(
 
 
 def _get_store() -> EventStore:
-    """Get EventStore for the configured project directory."""
+    """Get EventStore for the configured project directory.
+
+    Auto-inits if missing, mirroring the SessionStart hook behavior so MCP
+    tools work even when invoked before the hook fires (e.g. on the very
+    first tool call of a fresh plugin install). CLAUDE.md is intentionally
+    not touched — same rationale as the hook path.
+    """
     project_dir = os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd())
-    db_path = Path(project_dir) / ENGRAM_DIR / DB_NAME
+    project_path = Path(project_dir)
+    db_path = project_path / ENGRAM_DIR / DB_NAME
     if not db_path.exists():
-        raise FileNotFoundError(
-            f"Engram not initialized in {project_dir}. "
-            f"Run 'engram init' in the project directory first."
-        )
+        from engram.init import perform_init
+        try:
+            perform_init(project_path)
+        except Exception:
+            pass  # Fall through; the exists check below will raise.
+        if not db_path.exists():
+            raise FileNotFoundError(
+                f"Engram not initialized in {project_dir}. "
+                f"Run 'engram init' in the project directory first."
+            )
     store = EventStore(db_path)
     return store
 
