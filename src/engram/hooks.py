@@ -363,14 +363,16 @@ def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
     init_banner = ""
     if not db_path.exists():
         try:
-            result = perform_init(project_dir)
-            if not result.already_initialized:
+            init_result = perform_init(project_dir)
+            if not init_result.already_initialized:
                 init_banner = (
-                    f"Engram initialized for '{result.project_name}'. "
-                    f"{result.events_seeded} events seeded from git history.\n\n"
+                    f"Engram initialized for '{init_result.project_name}'. "
+                    f"{init_result.events_seeded} events seeded from git history.\n\n"
                 )
-        except OSError:
-            # Filesystem denied init (read-only mount, etc.) — fail quiet.
+        except Exception:
+            # Filesystem, SQLite, or other init failure — fail quiet so
+            # the session still starts. Matches the non-fatal hook pattern
+            # used elsewhere in this module (e.g. _maybe_auto_checkpoint).
             return ""
 
     store = _get_store(project_dir)
@@ -394,8 +396,8 @@ def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
         store.insert_session(sess)
 
         gen = BriefingGenerator(store)
-        result = gen.generate()
-        return init_banner + format_briefing_compact(result)
+        briefing = gen.generate()
+        return init_banner + format_briefing_compact(briefing)
     finally:
         store.close()
 

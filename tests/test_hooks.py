@@ -243,8 +243,27 @@ class TestSessionStartHook:
             {"session_id": "sess-abc", "cwd": str(tmp_path)},
             tmp_path,
         )
-        # Banner announces first-run init so the user knows what happened.
-        assert "initialized" in output.lower()
+        # Banner is prepended to the briefing so first-run output opens
+        # with the init announcement rather than the briefing header.
+        assert output.lower().startswith("engram initialized for")
+
+    def test_session_start_init_failure_returns_empty(self, tmp_path, monkeypatch):
+        # If perform_init raises (filesystem denial, SQLite error, etc.)
+        # the hook must fail quiet so the session still starts.
+        from engram import hooks
+
+        def boom(_project_dir):
+            raise OSError("simulated: no space left on device")
+
+        monkeypatch.setattr(hooks, "perform_init", boom)
+
+        output = handle_session_start(
+            {"session_id": "sess-abc", "cwd": str(tmp_path)},
+            tmp_path,
+        )
+
+        assert output == ""
+        assert not (tmp_path / ".engram" / "events.db").exists()
 
 
 class TestInstallHooks:
