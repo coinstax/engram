@@ -34,6 +34,7 @@ def test_perform_init_is_idempotent(tmp_path):
     second = perform_init(tmp_path)
     assert first.already_initialized is False
     assert second.already_initialized is True
+    assert second.project_name == first.project_name
 
 
 def test_perform_init_non_git_project_falls_back_to_dirname(tmp_path):

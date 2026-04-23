@@ -54,13 +54,14 @@ def perform_init(project_dir: Path, *, max_commits: int = 100) -> InitResult:
         event_count = 0
         try:
             bootstrapper = GitBootstrapper(project_dir)
+        except ValueError:
+            # Not a git repo — still initialize, just without seed data.
+            project_name = project_dir.name
+        else:
             project_name = bootstrapper.detect_project_name()
             events = bootstrapper.mine_history(max_commits=max_commits)
             if events:
                 event_count = store.insert_batch(events)
-        except ValueError:
-            # Not a git repo — still initialize, just without seed data.
-            project_name = project_dir.name
 
         store.set_meta("project_name", project_name)
         store.set_meta("initialized_at", datetime.now(timezone.utc).isoformat())
