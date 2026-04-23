@@ -208,12 +208,43 @@ class TestSessionStartHook:
         assert "Engram Briefing" in output
         assert "database schema" in output
 
-    def test_session_start_no_engram_returns_empty(self, tmp_path):
+    def test_session_start_no_engram_auto_inits(self, tmp_path):
         output = handle_session_start(
             {"session_id": "sess-abc", "cwd": str(tmp_path)},
             tmp_path,
         )
-        assert output == ""
+        # Auto-init should have created the DB
+        assert (tmp_path / ".engram" / "events.db").exists()
+        # Output includes a briefing (even if sparse on a fresh non-git dir)
+        assert "Engram" in output
+
+    def test_session_start_auto_init_does_not_touch_claude_md(self, tmp_path):
+        # Pre-existing CLAUDE.md must not be modified
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# User's own content\n")
+        pre = claude_md.read_text()
+
+        handle_session_start(
+            {"session_id": "sess-abc", "cwd": str(tmp_path)},
+            tmp_path,
+        )
+
+        assert claude_md.read_text() == pre
+
+    def test_session_start_auto_init_does_not_create_claude_md(self, tmp_path):
+        handle_session_start(
+            {"session_id": "sess-abc", "cwd": str(tmp_path)},
+            tmp_path,
+        )
+        assert not (tmp_path / "CLAUDE.md").exists()
+
+    def test_session_start_auto_init_includes_banner(self, tmp_path):
+        output = handle_session_start(
+            {"session_id": "sess-abc", "cwd": str(tmp_path)},
+            tmp_path,
+        )
+        # Banner announces first-run init so the user knows what happened.
+        assert "initialized" in output.lower()
 
 
 class TestInstallHooks:

@@ -12,6 +12,7 @@ from engram.models import Event, EventType, Session
 from engram.store import EventStore
 from engram.briefing import BriefingGenerator
 from engram.formatting import format_briefing_compact
+from engram.init import perform_init
 
 ENGRAM_DIR = ".engram"
 DB_NAME = "events.db"
@@ -350,7 +351,28 @@ def _handle_bash_outcome(tool_input: dict, stdin_data: dict,
 
 
 def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
-    """Handle SessionStart hook. Auto-registers session, returns briefing."""
+    """Handle SessionStart hook. Auto-inits if needed, registers session, returns briefing.
+
+    When `.engram/events.db` is missing we initialize it — git-history
+    bootstrap and meta are populated. CLAUDE.md is intentionally NOT
+    modified: the plugin already carries agent guidance via FastMCP
+    instructions and SKILL.md frontmatter, so we leave the user's
+    tracked CLAUDE.md alone.
+    """
+    db_path = project_dir / ENGRAM_DIR / DB_NAME
+    init_banner = ""
+    if not db_path.exists():
+        try:
+            result = perform_init(project_dir)
+            if not result.already_initialized:
+                init_banner = (
+                    f"Engram initialized for '{result.project_name}'. "
+                    f"{result.events_seeded} events seeded from git history.\n\n"
+                )
+        except OSError:
+            # Filesystem denied init (read-only mount, etc.) — fail quiet.
+            return ""
+
     store = _get_store(project_dir)
     if not store:
         return ""
@@ -358,15 +380,12 @@ def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
     try:
         agent_id = "claude-code"
 
-        # Stale cleanup
         store.cleanup_stale_sessions()
 
-        # Auto-end previous active session for this agent
         active = store.get_active_session(agent_id)
         if active:
             store.end_session(active.id)
 
-        # Auto-register new session
         project_name = store.get_meta("project_name") or project_dir.name
         sess = Session(
             id="", agent_id=agent_id,
@@ -376,7 +395,7 @@ def handle_session_start(stdin_data: dict, project_dir: Path) -> str:
 
         gen = BriefingGenerator(store)
         result = gen.generate()
-        return format_briefing_compact(result)
+        return init_banner + format_briefing_compact(result)
     finally:
         store.close()
 
