@@ -21,9 +21,9 @@ The project started as "AgentBus" (an inter-agent message bus), but after consul
 
 ## For Agents: How to Use Engram
 
-If Engram is configured as an MCP server in your environment, you have thirteen tools available.
+If Engram is configured in your environment — either via the Claude Code plugin (one-step install, see Setup below) or manually as an MCP server / CLI — you have thirteen tools available.
 
-If Claude Code hooks are installed (`engram hooks install`), file mutations and bash commands are captured automatically — you don't need to manually post `mutation` or `outcome` events.
+If Claude Code hooks are present (shipped with the plugin, or installed manually via `engram hooks install`), file mutations and bash command outcomes are captured automatically — you rarely need to post `mutation` or `outcome` events by hand.
 
 ### `briefing` — Start every session with this
 
@@ -106,11 +106,50 @@ The content should be self-contained. Future agents reading it won't have your c
 - Python 3.12+
 - A project directory (preferably a git repository — Engram mines git history on init)
 
-### Install
+Engram ships in two forms. Pick the one that matches your environment:
+
+- **Option 1: Claude Code plugin** — single-install bundle that auto-wires the MCP server, hooks, and slash-command skills. Recommended for Claude Code users.
+- **Option 2: Python package** — `pip install engram`, CLI-only or configured as an MCP server for other clients (Cline, Cursor, Continue, custom LLM apps). Use for headless automation or any environment that isn't Claude Code.
+
+Both paths share the same Python package underneath; the plugin is packaging + wiring on top. You can switch between them per project.
+
+### Option 1: Claude Code plugin (recommended)
+
+Install the Python package so `engram` and `engram-mcp` are on PATH:
+
+```bash
+# Once Engram ships on PyPI:
+pip install engram[mcp]
+
+# Until then, from a repo checkout:
+git clone https://github.com/coinstax/engram
+cd engram
+pip install -e ".[mcp]"
+```
+
+Load the plugin in Claude Code (dev mode, until a marketplace listing is published):
+
+```bash
+cd /path/to/your/project
+claude --plugin-dir /path/to/engram/plugin
+```
+
+What the plugin wires up:
+
+- `mcp__engram__*` MCP tools in every session
+- PostToolUse hooks that capture Write/Edit mutations and bash outcomes
+- SessionStart hook that auto-initializes `.engram/` on first launch, seeds from git history, and emits a briefing (no manual `engram init` needed)
+- Slash commands — currently `/engram:briefing`; more in v1.7.0 (`/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore`)
+
+The plugin does NOT modify your `CLAUDE.md` — agent-facing guidance is delivered through the MCP server's built-in `instructions` field and the plugin's SKILL.md files. See [plugin/README.md](plugin/README.md) for details including migrating from CLI-installed hooks (run `engram hooks uninstall` first to avoid duplicate event capture).
+
+Add `.engram/` to your `.gitignore` — the database is machine-local.
+
+### Option 2: Python package (for other MCP clients or headless use)
 
 ```bash
 # From source
-git clone <repo-url> engram
+git clone https://github.com/coinstax/engram
 cd engram
 pip install -e ".[mcp]"
 
@@ -118,7 +157,7 @@ pip install -e ".[mcp]"
 pip install -e .
 ```
 
-### Initialize in Your Project
+**Initialize in your project:**
 
 ```bash
 cd /path/to/your/project
@@ -133,29 +172,22 @@ This does four things:
 
 Add `.engram/` to your `.gitignore` — the database is local to each machine.
 
-### Enable Passive Observation (Claude Code Hooks)
+**Enable passive observation (Claude Code hooks, manual install):**
 
 ```bash
 engram hooks install
 ```
 
-This writes hooks to `.claude/settings.json` that automatically:
+Writes hooks to `.claude/settings.json` that automatically:
 - Record file mutations when Claude Code uses Write or Edit tools
 - Record bash command outcomes (skips trivial commands like `ls`, `cat`, `pwd`)
 - Inject a project briefing at the start of each session
 
-With hooks installed, agents get context automatically without manual posting.
+With hooks installed, agents get context automatically without manual posting. Check status or remove with `engram hooks show` / `engram hooks uninstall`. (If you're using Option 1, skip this — the plugin already ships these hooks.)
 
-Check status or remove later with:
+**Configure as MCP server (for clients other than the plugin):**
 
-```bash
-engram hooks show
-engram hooks uninstall
-```
-
-### Configure as MCP Server (for Claude Code)
-
-Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-level):
+Add to your agent's MCP configuration:
 
 ```json
 {
@@ -172,9 +204,9 @@ Add to your Claude Code MCP configuration (`~/.claude/settings.json` or project-
 
 The MCP server exposes thirteen tools: `post_event`, `query`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
 
-### Add Agent Instructions
+**Agent instructions (if your framework doesn't auto-load `CLAUDE.md`):**
 
-Add this to your project's `CLAUDE.md` (or equivalent agent instruction file):
+`engram init` writes this block to your project's `CLAUDE.md`. If your agent framework reads instructions from a different file, copy it there:
 
 ```markdown
 ## Project Memory (Engram)
@@ -324,7 +356,7 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.6.1** (current release) — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
 
-**v1.7.0** (in progress, branch `v1.7-plugin`) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and a set of slash-command skills (`/engram:briefing`, `/engram:post-decision`, etc.). The Python CLI stays first-class for headless/automation use. See [plugin/README.md](plugin/README.md) for the current state and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
+**v1.7.0** (in progress, branch `v1.7-plugin`) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and slash-command skills. First launch in an uninitialized project auto-creates `.engram/` and seeds from git history without modifying the user's tracked `CLAUDE.md` (agent guidance rides on the MCP server's `instructions` field and plugin SKILL.md files instead). Python CLI stays first-class for headless/automation use. Currently ships `/engram:briefing`; `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` land next. See [plugin/README.md](plugin/README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
 
 **Next after v1.7** — Hierarchical summarization, conflict detection, outcome tracking
 
