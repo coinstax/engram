@@ -506,7 +506,7 @@ git commit -m "docs: record plugin auto-init resolution and first-run behavior"
 - [ ] **Step 1: Reset the sandbox**
 
 ```bash
-cd /home/cdm/engram-test
+cd "$HOME/engram-test"    # or any scratch directory outside the engram source tree
 rm -rf .engram .claude CLAUDE.md
 ls -la
 ```
@@ -515,8 +515,8 @@ Expected: no `.engram/`, no `.claude/`, no `CLAUDE.md` (or only the user's pre-e
 - [ ] **Step 2: Launch Claude Code with the plugin in dev mode**
 
 ```bash
-cd /home/cdm/engram-test
-claude --debug --plugin-dir /home/cdm/engram/plugin
+cd "$HOME/engram-test"
+claude --debug --plugin-dir "$ENGRAM_REPO/plugin"   # $ENGRAM_REPO = absolute path to the engram checkout
 ```
 
 - [ ] **Step 3: In the Claude Code session, verify auto-init happened**
@@ -553,7 +553,7 @@ Post an Engram event in THIS project (not the sandbox):
 mcp__engram__post_event with:
   event_type: "discovery"
   scope: ["plugin/", "src/engram/hooks.py", "src/engram/init.py"]
-  content: "Phase 2b onboarding gap fix verified end-to-end in /home/cdm/engram-test sandbox on <YYYY-MM-DD> with Claude Code <version>. Plugin install → first SessionStart auto-created .engram/events.db, seeded git history, did not touch CLAUDE.md. mcp__engram__status and /engram:briefing both worked on first invocation without prior engram init."
+  content: "Phase 2b onboarding gap fix verified end-to-end in the scratch sandbox on <YYYY-MM-DD> with Claude Code <version>. Plugin install → first SessionStart auto-created .engram/events.db, seeded git history, did not touch CLAUDE.md. mcp__engram__status and /engram:briefing both worked on first invocation without prior engram init."
 ```
 
 - [ ] **Step 6: No code commit here — verification only**
