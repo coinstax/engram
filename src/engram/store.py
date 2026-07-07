@@ -8,7 +8,7 @@ from pathlib import Path
 
 from engram.models import Checkpoint, Event, EventType, QueryFilter, Session
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 STALE_SESSION_HOURS = 24
 
@@ -234,6 +234,45 @@ class EventStore:
                     "ALTER TABLE events ADD COLUMN session_id TEXT"
                 )
             self.set_meta("schema_version", "5")
+
+        if version < 6:
+            columns = {
+                row[1] for row in
+                self._conn.execute("PRAGMA table_info(events)").fetchall()
+            }
+            if "area" not in columns:
+                self._conn.execute("ALTER TABLE events ADD COLUMN area TEXT")
+            # Rebuild the FTS index to include the area column.
+            self._conn.executescript("""
+                DROP TRIGGER IF EXISTS events_ai;
+                DROP TABLE IF EXISTS events_fts;
+                CREATE VIRTUAL TABLE events_fts USING fts5(
+                    content, scope, area,
+                    content=events, content_rowid=rowid
+                );
+                CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN
+                    INSERT INTO events_fts(rowid, content, scope, area)
+                    VALUES (new.rowid, new.content, new.scope, new.area);
+                END;
+                INSERT INTO events_fts(events_fts) VALUES('rebuild');
+            """)
+            # Backfill area from the optional .engram/areas.json map.
+            from engram.areas import load_area_map, infer_area
+            project_dir = self.db_path.parent.parent
+            rules = load_area_map(project_dir)
+            if rules:
+                rows = self._conn.execute(
+                    "SELECT id, scope FROM events WHERE area IS NULL"
+                ).fetchall()
+                for row in rows:
+                    scope = json.loads(row["scope"]) if row["scope"] else None
+                    area = infer_area(scope, rules)
+                    if area:
+                        self._conn.execute(
+                            "UPDATE events SET area = ? WHERE id = ?",
+                            (area, row["id"]),
+                        )
+            self.set_meta("schema_version", "6")
 
     @staticmethod
     def _generate_id() -> str:

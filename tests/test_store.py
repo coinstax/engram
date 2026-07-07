@@ -239,3 +239,60 @@ def test_area_is_full_text_searchable(tmp_path):
         assert hits[0].area == "emailchange"
     finally:
         store.close()
+
+
+def test_migration_v5_to_v6_backfills_area(tmp_path):
+    import json
+    from engram.store import EventStore
+    from engram.models import Event, EventType
+
+    engram = tmp_path / ".engram"
+    engram.mkdir()
+    (engram / "areas.json").write_text(json.dumps(
+        {"rules": [{"prefix": "src/billing/", "area": "billing"}]}))
+    db = engram / "events.db"
+
+    store = EventStore(db)
+    store.initialize()
+    store.insert(Event(id="evt-1", timestamp="2026-01-01T00:00:00+00:00",
+                       event_type=EventType.DECISION, agent_id="t",
+                       content="c", scope=["src/billing/pay.py"]))
+    store.conn.execute("UPDATE events SET area = NULL")
+    store.set_meta("schema_version", "5")
+    store.conn.commit()
+    store.close()
+
+    store2 = EventStore(db)
+    try:
+        assert store2.get_meta("schema_version") == "6"
+        rows = store2.recent_by_type(EventType.DECISION)
+        assert rows[0].area == "billing"
+        assert rows[0].scope == ["src/billing/pay.py"]
+    finally:
+        store2.close()
+
+
+def test_migration_v6_no_map_leaves_area_null(tmp_path):
+    from engram.store import EventStore
+    from engram.models import Event, EventType
+
+    engram = tmp_path / ".engram"
+    engram.mkdir()
+    db = engram / "events.db"
+
+    store = EventStore(db)
+    store.initialize()
+    store.insert(Event(id="evt-1", timestamp="2026-01-01T00:00:00+00:00",
+                       event_type=EventType.DECISION, agent_id="t",
+                       content="c", scope=["src/billing/pay.py"]))
+    store.set_meta("schema_version", "5")
+    store.conn.execute("UPDATE events SET area = NULL")
+    store.conn.commit()
+    store.close()
+
+    store2 = EventStore(db)
+    try:
+        assert store2.get_meta("schema_version") == "6"
+        assert store2.recent_by_type(EventType.DECISION)[0].area is None
+    finally:
+        store2.close()
