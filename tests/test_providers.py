@@ -97,6 +97,20 @@ class TestModelOverrides:
         assert "local" in merged                         # custom added
         assert merged["claude-opus"].model_id == "claude-opus-4-8"  # builtin intact
 
+    def test_model_summary_loads_dotenv_before_checking_keys(self, tmp_path):
+        # Regression: key_present must reflect .env (what consult actually
+        # loads), not just the raw process environment.
+        def fake_load_env():
+            os.environ["FAKE_DOTENV_KEY"] = "from-dotenv"
+
+        custom = {"local": ModelConfig("openai", "llama", "FAKE_DOTENV_KEY")}
+        with patch("engram.providers._load_env", side_effect=fake_load_env):
+            try:
+                rows = {r["key"]: r for r in model_summary(custom)}
+            finally:
+                os.environ.pop("FAKE_DOTENV_KEY", None)
+        assert rows["local"]["key_present"] is True
+
     def test_model_summary_marks_source_and_key_presence(self, tmp_path):
         self._write(tmp_path, {"models": {
             "local": {"provider": "openai", "model_id": "llama", "env_key": "LOCAL_KEY_XYZ"},
@@ -155,6 +169,40 @@ class TestSendMessage:
         mock_dispatch.__getitem__ = MagicMock(return_value=mock_fn)
         result = send_message("claude-sonnet", [{"role": "user", "content": "hi"}])
         assert result == "Anthropic response"
+
+
+class TestMissingSDK:
+
+    def _hide(self, name):
+        import sys
+        saved = {m: sys.modules.get(m) for m in list(sys.modules) if m == name or m.startswith(name + ".")}
+        for m in saved:
+            del sys.modules[m]
+        sys.modules[name] = None  # forces ImportError on `from name import ...`
+        return saved
+
+    def _restore(self, name, saved):
+        import sys
+        sys.modules.pop(name, None)
+        sys.modules.update({k: v for k, v in saved.items() if v is not None})
+
+    @patch("engram.providers._get_api_key", return_value="sk-test")
+    def test_missing_openai_sdk_gives_install_hint(self, mock_key):
+        saved = self._hide("openai")
+        try:
+            with pytest.raises(ImportError, match=r"engram\[consult\]"):
+                _send_openai(MODELS["gpt"], [{"role": "user", "content": "hi"}], None)
+        finally:
+            self._restore("openai", saved)
+
+    @patch("engram.providers._get_api_key", return_value="ant-test")
+    def test_missing_httpx_gives_install_hint(self, mock_key):
+        saved = self._hide("httpx")
+        try:
+            with pytest.raises(ImportError, match=r"engram\[consult\]"):
+                _send_anthropic(MODELS["claude-opus"], [{"role": "user", "content": "hi"}], None)
+        finally:
+            self._restore("httpx", saved)
 
 
 class TestOpenAIProvider:

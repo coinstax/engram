@@ -89,7 +89,13 @@ def resolve_models(project_dir: Path | str) -> dict[str, ModelConfig]:
 
 
 def model_summary(models_map: dict[str, ModelConfig]) -> list[dict]:
-    """Describe available models for discovery (CLI/MCP 'list models')."""
+    """Describe available models for discovery (CLI/MCP 'list models').
+
+    Loads a project .env first so key_present reflects what a real
+    consultation will see (env vars plus .env), not just the raw process
+    environment.
+    """
+    _load_env()
     builtin_keys = set(BUILTIN_MODELS)
     return [
         {
@@ -134,7 +140,12 @@ def _get_api_key(config: ModelConfig) -> str:
 
 def _send_openai(config: ModelConfig, messages: list[dict], system_prompt: str | None) -> str:
     """Send via OpenAI SDK (also handles OpenAI-compatible APIs like xAI)."""
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise ImportError(
+            'OpenAI SDK not installed. Run: pip install "engram[consult]" (or "engram[all]").'
+        ) from e
     kwargs = {"api_key": _get_api_key(config)}
     if config.base_url:
         kwargs["base_url"] = config.base_url
@@ -161,7 +172,12 @@ def _send_openai(config: ModelConfig, messages: list[dict], system_prompt: str |
 
 def _send_google(config: ModelConfig, messages: list[dict], system_prompt: str | None) -> str:
     """Send via Google GenAI SDK (google-genai, not deprecated google-generativeai)."""
-    from google import genai
+    try:
+        from google import genai
+    except ImportError as e:
+        raise ImportError(
+            'Google GenAI SDK not installed. Run: pip install "engram[consult]" (or "engram[all]").'
+        ) from e
 
     client = genai.Client(api_key=_get_api_key(config))
 
@@ -193,7 +209,12 @@ def _send_google(config: ModelConfig, messages: list[dict], system_prompt: str |
 
 def _send_anthropic(config: ModelConfig, messages: list[dict], system_prompt: str | None) -> str:
     """Send via Anthropic API using httpx directly."""
-    import httpx
+    try:
+        import httpx
+    except ImportError as e:
+        raise ImportError(
+            'httpx not installed (needed for Anthropic). Run: pip install "engram[consult]" (or "engram[all]").'
+        ) from e
 
     api_key = _get_api_key(config)
 

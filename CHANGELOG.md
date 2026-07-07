@@ -7,6 +7,7 @@ Consultation models are refreshed to current frontier flagships and the curated 
 ### Added
 - **Per-project model overrides** — `.engram/models.json` (`{"models": {"<key>": {"provider", "model_id", "env_key", "base_url"?, "thinking"?, "reasoning_effort"?}}}`) adds new models or overrides builtins by key. Best-effort loading: a missing/malformed file or a bad entry is skipped, never fatal (mirrors `areas.json`). `providers.resolve_models()` merges builtins with overrides (overrides win) and threads through `ConsultationEngine` for both validation and dispatch.
 - **Model discovery** — `engram consult models` (CLI, `--format compact|json`) and `list_models` (MCP tool) list every available model key, its provider/model ID, whether its API key is present in the environment, and whether it's a builtin or a project custom. Closes the gap where a user had to read source to learn the valid `--models` keys.
+- **Actionable missing-SDK errors** — the provider SDKs (`openai`, `google-genai`, `httpx`) are optional extras; when one is absent a consult now fails with `pip install "engram[consult]"` guidance instead of a bare `ModuleNotFoundError`. README documents the `[consult]` / `[all]` extras and the provider env vars.
 
 ### Changed
 - **Refreshed default models to current frontier flagships** (verified mid-2026), with version-agnostic keys so future ID bumps never rename a key: `gpt` → `gpt-5.5`, `claude-opus` → `claude-opus-4-8`, `claude-sonnet` → `claude-sonnet-5`, `gemini-pro` → `gemini-3.1-pro-preview`, `gemini-flash` → `gemini-3.5-flash`, `grok` → `grok-4.3`. The old `gpt-4o` and `o3` keys are retained as deprecated aliases (→ `gpt-5.5`) so stored conversations and existing muscle memory keep resolving.
@@ -14,9 +15,10 @@ Consultation models are refreshed to current frontier flagships and the curated 
 
 ### Fixed
 - **Anthropic thinking uses adaptive mode** — `_send_anthropic` now sends `thinking: {"type": "adaptive"}` instead of `{"type": "enabled", "budget_tokens": 10000}`. `budget_tokens` is removed on Opus 4.8 / Sonnet 5 and returns a 400; adaptive is the only on-mode and lets the model pace its own depth. Without this fix, refreshing the Claude model IDs alone would have broken every Claude consultation.
+- **Discovery reflects `.env`** — `model_summary` now loads the project `.env` before checking key presence, so `engram consult models` / `list_models` report a key as present when it lives in `.env` (which the consult path itself loads via dotenv). Previously it checked only the raw process environment and showed false `no-key` for `.env`-based setups.
 
 ### Stats
-- 335 tests passing (+11); schema unchanged at v6
+- 338 tests passing (+14); schema unchanged at v6
 - Version bumped to `1.8.0` across `pyproject.toml`, `src/engram/__init__.py`, `plugin/.claude-plugin/plugin.json`
 
 ## v1.7.0 — 2026-07-06

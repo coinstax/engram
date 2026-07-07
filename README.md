@@ -192,6 +192,15 @@ pip install -e ".[mcp]"
 pip install -e .
 ```
 
+**Consultations need extra SDKs.** The multi-model consult feature (`engram consult`, `start_consultation`) depends on the provider SDKs, which are optional so the base install and MCP server stay lean. Install them with the `consult` extra (or `all` for MCP + consult together):
+
+```bash
+pip install -e ".[consult]"   # openai, google-genai, httpx, python-dotenv
+pip install -e ".[all]"       # mcp + consult
+```
+
+Set the provider keys you plan to use (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`) in the environment or a project `.env`. Run `engram consult models` to see which keys are detected. Without the SDKs, a consult fails with a message telling you to install `engram[consult]`.
+
 **Initialize in your project:**
 
 ```bash
