@@ -20,8 +20,16 @@ DB_NAME = "events.db"
 
 mcp = FastMCP("engram", instructions=(
     "Engram is the project memory system. Use it to record decisions, "
-    "discoveries, warnings, and changes. Always run 'briefing' at the "
-    "start of a session to understand project context."
+    "discoveries, warnings, and changes.\n\n"
+    "Reading: run 'briefing' at the start of a session for critical + active "
+    "context. For targeted recall ('what did we decide about X?'), use 'query' "
+    "with full-text search and --type/--since/--scope filters — do not scroll "
+    "the whole briefing.\n\n"
+    "Lifecycle: events are not just append-only. When a warning is addressed, "
+    "call 'resolve_event' so it stops surfacing as live. When a decision is "
+    "replaced, post the new decision, then 'supersede_event' the old one with "
+    "the new id. Use 'reopen_event' if a resolved issue resurfaces. Keeping "
+    "status current is what keeps briefings showing only the live state."
 ))
 
 
@@ -82,7 +90,11 @@ def post_event(
     store = _get_store()
     try:
         if len(content) > 2000:
-            content = content[:2000]
+            raise ValueError(
+                f"Event content is {len(content)} chars; max is 2000. "
+                f"Summarize, or split into linked events (post the detail "
+                f"first, then reference its id via related_ids)."
+            )
 
         # Auto-link to active session if not specified
         if session_id is None:
@@ -102,6 +114,87 @@ def post_event(
         )
         result = store.insert(event)
         return format_compact([result])
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def resolve_event(event_id: str, reason: str) -> str:
+    """Mark an active event as resolved so it stops surfacing as live.
+
+    Use when a warning has been addressed or an open item is done. Only
+    active events can be resolved. Prefer this over posting a second
+    "fixed" event and hoping the reader correlates them.
+
+    Args:
+        event_id: Id of the active event to resolve
+        reason: Short note on how it was resolved (e.g. "Fixed in PR #123")
+    """
+    store = _get_store()
+    try:
+        event = store.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event not found: {event_id}")
+        if event.status != "active":
+            raise ValueError(f"Event {event_id} is {event.status}, not active.")
+        updated = store.update_status(event_id, "resolved", resolved_reason=reason)
+        return format_compact([updated])
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def supersede_event(event_id: str, superseded_by: str) -> str:
+    """Mark an event as replaced by a newer one so briefings show only the live state.
+
+    Use when a decision reverses or a fact changes: post the new event
+    first, then supersede the old one with the new id. Only active events
+    can be superseded; superseded events cannot be reopened.
+
+    Args:
+        event_id: Id of the event being replaced
+        superseded_by: Id of the newer event that replaces it
+    """
+    store = _get_store()
+    try:
+        old = store.get_event(event_id)
+        if not old:
+            raise ValueError(f"Event not found: {event_id}")
+        new = store.get_event(superseded_by)
+        if not new:
+            raise ValueError(f"Superseding event not found: {superseded_by}")
+        if old.status != "active":
+            raise ValueError(f"Event {event_id} is {old.status}, not active.")
+        updated = store.update_status(event_id, "superseded", superseded_by=superseded_by)
+        return format_compact([updated])
+    finally:
+        store.close()
+
+
+@mcp.tool()
+def reopen_event(event_id: str) -> str:
+    """Reopen a resolved event, setting it back to active.
+
+    Use when a resolved issue resurfaces. Superseded events cannot be
+    reopened — post a fresh event instead.
+
+    Args:
+        event_id: Id of the resolved event to reopen
+    """
+    store = _get_store()
+    try:
+        event = store.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event not found: {event_id}")
+        if event.status == "superseded":
+            raise ValueError(
+                f"Superseded events cannot be reopened. Event {event_id} was "
+                f"superseded by {event.superseded_by}."
+            )
+        if event.status == "active":
+            raise ValueError(f"Event {event_id} is already active.")
+        updated = store.update_status(event_id, "active")
+        return format_compact([updated])
     finally:
         store.close()
 

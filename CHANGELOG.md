@@ -12,6 +12,11 @@ Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` 
 - `.gitignore` exception for `plugin/.mcp.json`
 - **Plugin auto-init on SessionStart** — when the Engram Claude Code plugin is installed into a project that has not yet been initialized, the SessionStart hook now runs the equivalent of `engram init` automatically (creating `.engram/`, seeding from git history, setting project meta) so `/engram:briefing` and the MCP tools work on first launch. CLAUDE.md is intentionally not modified from the plugin path — agent guidance is already delivered via the FastMCP `instructions` field and plugin SKILL.md frontmatter.
 - `src/engram/init.py` — shared `perform_init()` helper extracted from the `engram init` CLI; used by both the CLI command and the SessionStart hook.
+- **MCP event-lifecycle tools** — `resolve_event`, `supersede_event`, and `reopen_event` are now exposed over MCP, mirroring the existing `engram resolve` / `supersede` / `reopen` CLI commands. Previously agents using the MCP server could only append events, so a superseded decision or fixed warning kept surfacing in briefings as if live. The underlying store/status logic already existed (`Event.status`, `Event.superseded_by`, `store.update_status`); this wires it to the MCP surface. Same validation as the CLI (only active events resolve/supersede; superseded events cannot reopen).
+- **Expanded MCP `instructions`** — the FastMCP server description now tells agents to use `query` for targeted recall instead of scrolling the whole briefing, and to keep event status current via the lifecycle tools. Addresses discoverability feedback that `query` and the lifecycle ops were going unused.
+
+### Fixed (in progress)
+- **MCP `post_event` no longer silently truncates** — content over 2000 chars now raises a clear `ValueError` (with the actual length and guidance to summarize or split into linked events) instead of quietly slicing to `content[:2000]` and persisting a truncated record. Matches the CLI's DB-level `CHECK(length(content) <= 2000)` which fails loudly.
 
 ### Planned before release
 - Remaining MVP skills: `post-decision`, `query`, `checkpoint-save`, `checkpoint-restore`

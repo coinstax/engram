@@ -62,13 +62,15 @@ class TestMCPTools:
         assert "[discovery]" in result
         assert "performance bottleneck" in result
 
-    def test_post_event_truncates(self, mcp_project):
-        from engram.mcp_server import post_event
-        result = post_event(
-            event_type="discovery",
-            content="x" * 2500,
-        )
-        assert "[discovery]" in result
+    def test_post_event_rejects_oversized_content(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        with pytest.raises(ValueError, match="2500 chars"):
+            post_event(
+                event_type="discovery",
+                content="x" * 2500,
+            )
+        # Nothing persisted — no silent truncation.
+        assert "xxxx" not in query(text="xxxx")
 
     def test_query_text(self, mcp_project):
         from engram.mcp_server import query
@@ -161,6 +163,80 @@ class TestMCPTools:
         result = query(related_to="evt-target", event_type="decision")
         assert "Linked decision" in result
         assert "Linked outcome" not in result
+
+
+class TestMCPLifecycle:
+    """MCP must expose the same resolve/supersede/reopen lifecycle as the CLI,
+    so agents can flip stale events instead of only appending."""
+
+    def _first_id(self, text=None, event_type=None):
+        from engram.mcp_server import query
+        rows = json.loads(query(text=text, event_type=event_type, format="json"))
+        return rows[0]["id"]
+
+    def test_resolve_event(self, mcp_project):
+        from engram.mcp_server import resolve_event, query
+        eid = self._first_id(text="schema")
+        result = resolve_event(eid, reason="Fixed in PR #1")
+        assert eid in result or "schema" in result
+        row = json.loads(query(text="schema", format="json"))[0]
+        assert row["status"] == "resolved"
+        assert row["resolved_reason"] == "Fixed in PR #1"
+
+    def test_resolve_non_active_rejected(self, mcp_project):
+        from engram.mcp_server import resolve_event
+        eid = self._first_id(text="schema")
+        resolve_event(eid, reason="once")
+        with pytest.raises(ValueError, match="not active"):
+            resolve_event(eid, reason="twice")
+
+    def test_resolve_missing_event(self, mcp_project):
+        from engram.mcp_server import resolve_event
+        with pytest.raises(ValueError, match="not found"):
+            resolve_event("evt-nope", reason="x")
+
+    def test_supersede_event(self, mcp_project):
+        from engram.mcp_server import post_event, supersede_event, query
+        old_id = self._first_id(event_type="decision")
+        post_event(event_type="decision", content="Now using sessions, not JWT")
+        new_id = json.loads(
+            query(text="sessions", event_type="decision", format="json")
+        )[0]["id"]
+        supersede_event(old_id, superseded_by=new_id)
+        rows = json.loads(query(event_type="decision", format="json"))
+        old = next(r for r in rows if r["id"] == old_id)
+        assert old["status"] == "superseded"
+        assert old["superseded_by"] == new_id
+
+    def test_supersede_missing_new_event(self, mcp_project):
+        from engram.mcp_server import supersede_event
+        old_id = self._first_id(event_type="decision")
+        with pytest.raises(ValueError, match="Superseding event not found"):
+            supersede_event(old_id, superseded_by="evt-nope")
+
+    def test_reopen_event(self, mcp_project):
+        from engram.mcp_server import resolve_event, reopen_event, query
+        eid = self._first_id(text="schema")
+        resolve_event(eid, reason="fixed")
+        reopen_event(eid)
+        assert json.loads(query(text="schema", format="json"))[0]["status"] == "active"
+
+    def test_reopen_superseded_rejected(self, mcp_project):
+        from engram.mcp_server import post_event, supersede_event, reopen_event, query
+        old_id = self._first_id(event_type="decision")
+        post_event(event_type="decision", content="replacement decision")
+        new_id = json.loads(
+            query(text="replacement", event_type="decision", format="json")
+        )[0]["id"]
+        supersede_event(old_id, superseded_by=new_id)
+        with pytest.raises(ValueError, match="cannot be reopened"):
+            reopen_event(old_id)
+
+    def test_reopen_active_rejected(self, mcp_project):
+        from engram.mcp_server import reopen_event
+        eid = self._first_id(text="schema")
+        with pytest.raises(ValueError, match="already active"):
+            reopen_event(eid)
 
 
 class TestMCPAutoInit:
