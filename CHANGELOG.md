@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.8.0 — 2026-07-07
+
+Consultation models are refreshed to current frontier flagships and the curated set is now extensible per project, so it never goes fully stale. Fixes a latent break: the Anthropic provider still requested extended thinking with `budget_tokens`, which current Claude models reject with a 400 — every Claude consult would have failed once the model IDs advanced.
+
+### Added
+- **Per-project model overrides** — `.engram/models.json` (`{"models": {"<key>": {"provider", "model_id", "env_key", "base_url"?, "thinking"?, "reasoning_effort"?}}}`) adds new models or overrides builtins by key. Best-effort loading: a missing/malformed file or a bad entry is skipped, never fatal (mirrors `areas.json`). `providers.resolve_models()` merges builtins with overrides (overrides win) and threads through `ConsultationEngine` for both validation and dispatch.
+- **Model discovery** — `engram consult models` (CLI, `--format compact|json`) and `list_models` (MCP tool) list every available model key, its provider/model ID, whether its API key is present in the environment, and whether it's a builtin or a project custom. Closes the gap where a user had to read source to learn the valid `--models` keys.
+
+### Changed
+- **Refreshed default models to current frontier flagships** (verified mid-2026), with version-agnostic keys so future ID bumps never rename a key: `gpt` → `gpt-5.5`, `claude-opus` → `claude-opus-4-8`, `claude-sonnet` → `claude-sonnet-5`, `gemini-pro` → `gemini-3.1-pro-preview`, `gemini-flash` → `gemini-3.5-flash`, `grok` → `grok-4.3`. The old `gpt-4o` and `o3` keys are retained as deprecated aliases (→ `gpt-5.5`) so stored conversations and existing muscle memory keep resolving.
+- **Gemini thinking** — dropped the explicit `thinking_budget` on the Google path; Gemini 3.x reasons by default and the budget/level parameter shape changed across SDK versions. Thinking models still get the longer request timeout.
+
+### Fixed
+- **Anthropic thinking uses adaptive mode** — `_send_anthropic` now sends `thinking: {"type": "adaptive"}` instead of `{"type": "enabled", "budget_tokens": 10000}`. `budget_tokens` is removed on Opus 4.8 / Sonnet 5 and returns a 400; adaptive is the only on-mode and lets the model pace its own depth. Without this fix, refreshing the Claude model IDs alone would have broken every Claude consultation.
+
+### Stats
+- 335 tests passing (+11); schema unchanged at v6
+- Version bumped to `1.8.0` across `pyproject.toml`, `src/engram/__init__.py`, `plugin/.claude-plugin/plugin.json`
+
 ## v1.7.0 — 2026-07-06
 
 Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` replaces the previous three-step setup (`pip install`, `engram hooks install`, manual MCP config). The Python CLI and `engram-mcp` binary remain first-class — the plugin shells out to them, keeping a single release surface for headless/automation use. This release also closes lifecycle gaps in the MCP surface and adds an `area` tag for grouping events by concept.

@@ -1,5 +1,11 @@
-"""Multi-model provider abstraction for AI consultations."""
+"""Multi-model provider abstraction for AI consultations.
 
+Model IDs are refreshed to current frontier flagships (mid-2026). The curated
+set can be extended or overridden per project via .engram/models.json so the
+list never goes fully stale — see load_model_overrides / resolve_models.
+"""
+
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,19 +18,91 @@ class ModelConfig:
     env_key: str
     base_url: str | None = None
     thinking: bool = False
+    # OpenAI-family reasoning effort ("low"|"medium"|"high"|"xhigh"); None = off.
+    reasoning_effort: str | None = None
 
 
-MODELS: dict[str, ModelConfig] = {
-    # Standard models
-    "gpt-4o": ModelConfig("openai", "gpt-4o", "OPENAI_API_KEY"),
-    "gemini-flash": ModelConfig("google", "gemini-2.5-flash", "GOOGLE_API_KEY"),
-    "claude-sonnet": ModelConfig("anthropic", "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
-    "grok": ModelConfig("openai", "grok-3-latest", "XAI_API_KEY", base_url="https://api.x.ai/v1"),
-    # Thinking models
-    "o3": ModelConfig("openai", "o3", "OPENAI_API_KEY", thinking=True),
-    "claude-opus": ModelConfig("anthropic", "claude-opus-4-20250514", "ANTHROPIC_API_KEY", thinking=True),
-    "gemini-pro": ModelConfig("google", "gemini-2.5-pro", "GOOGLE_API_KEY", thinking=True),
+# Curated frontier flagships (verified current 2026). Keys are version-agnostic
+# so refreshing a model_id below never renames the key users type.
+BUILTIN_MODELS: dict[str, ModelConfig] = {
+    "gpt": ModelConfig("openai", "gpt-5.5", "OPENAI_API_KEY", reasoning_effort="high"),
+    "claude-opus": ModelConfig("anthropic", "claude-opus-4-8", "ANTHROPIC_API_KEY", thinking=True),
+    "claude-sonnet": ModelConfig("anthropic", "claude-sonnet-5", "ANTHROPIC_API_KEY", thinking=True),
+    "gemini-pro": ModelConfig("google", "gemini-3.1-pro-preview", "GOOGLE_API_KEY", thinking=True),
+    "gemini-flash": ModelConfig("google", "gemini-3.5-flash", "GOOGLE_API_KEY"),
+    "grok": ModelConfig("openai", "grok-4.3", "XAI_API_KEY", base_url="https://api.x.ai/v1"),
+    # Deprecated aliases — kept so old keys / stored conversations still resolve.
+    "gpt-4o": ModelConfig("openai", "gpt-5.5", "OPENAI_API_KEY", reasoning_effort="high"),
+    "o3": ModelConfig("openai", "gpt-5.5", "OPENAI_API_KEY", reasoning_effort="high"),
 }
+
+# Back-compat module alias: existing callers import providers.MODELS directly.
+MODELS = BUILTIN_MODELS
+
+_VALID_PROVIDERS = ("openai", "google", "anthropic")
+
+
+def load_model_overrides(project_dir: Path | str) -> dict[str, ModelConfig]:
+    """Load extra/override models from <project_dir>/.engram/models.json.
+
+    Shape: {"models": {"<key>": {"provider", "model_id", "env_key",
+    "base_url"?, "thinking"?, "reasoning_effort"?}}}. Missing file,
+    unreadable file, malformed JSON, or a bad entry are all best-effort
+    non-fatal — invalid entries are skipped, the rest still load.
+    """
+    path = Path(project_dir) / ".engram" / "models.json"
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError, ValueError):
+        return {}
+    raw = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, ModelConfig] = {}
+    for key, spec in raw.items():
+        if not (isinstance(key, str) and isinstance(spec, dict)):
+            continue
+        provider = spec.get("provider")
+        model_id = spec.get("model_id")
+        env_key = spec.get("env_key")
+        if provider not in _VALID_PROVIDERS:
+            continue
+        if not (isinstance(model_id, str) and model_id and isinstance(env_key, str) and env_key):
+            continue
+        base_url = spec.get("base_url")
+        reasoning_effort = spec.get("reasoning_effort")
+        out[key] = ModelConfig(
+            provider=provider,
+            model_id=model_id,
+            env_key=env_key,
+            base_url=base_url if isinstance(base_url, str) else None,
+            thinking=bool(spec.get("thinking", False)),
+            reasoning_effort=reasoning_effort if isinstance(reasoning_effort, str) else None,
+        )
+    return out
+
+
+def resolve_models(project_dir: Path | str) -> dict[str, ModelConfig]:
+    """Return builtin models merged with project overrides (overrides win)."""
+    return {**BUILTIN_MODELS, **load_model_overrides(project_dir)}
+
+
+def model_summary(models_map: dict[str, ModelConfig]) -> list[dict]:
+    """Describe available models for discovery (CLI/MCP 'list models')."""
+    builtin_keys = set(BUILTIN_MODELS)
+    return [
+        {
+            "key": key,
+            "provider": cfg.provider,
+            "model_id": cfg.model_id,
+            "env_key": cfg.env_key,
+            "key_present": bool(os.environ.get(cfg.env_key)),
+            "thinking": cfg.thinking or cfg.reasoning_effort is not None,
+            "source": "builtin" if key in builtin_keys else "custom",
+        }
+        for key, cfg in models_map.items()
+    ]
 
 
 def _load_env() -> None:
@@ -62,18 +140,20 @@ def _send_openai(config: ModelConfig, messages: list[dict], system_prompt: str |
         kwargs["base_url"] = config.base_url
     client = OpenAI(**kwargs)
 
+    is_reasoning = config.reasoning_effort is not None
+
     api_messages = []
     if system_prompt:
-        if config.thinking:
-            # o3/reasoning models: use developer message instead of system
+        if is_reasoning:
+            # Reasoning models (e.g. GPT-5.x) take a developer message, not system.
             api_messages.append({"role": "developer", "content": system_prompt})
         else:
             api_messages.append({"role": "system", "content": system_prompt})
     api_messages.extend(messages)
 
     create_kwargs: dict = {"model": config.model_id, "messages": api_messages}
-    if config.thinking:
-        create_kwargs["reasoning_effort"] = "high"
+    if config.reasoning_effort:
+        create_kwargs["reasoning_effort"] = config.reasoning_effort
 
     response = client.chat.completions.create(**create_kwargs)
     return response.choices[0].message.content
@@ -98,9 +178,9 @@ def _send_google(config: ModelConfig, messages: list[dict], system_prompt: str |
     if system_prompt:
         config_kwargs["system_instruction"] = system_prompt
     if config.thinking:
-        config_kwargs["thinking_config"] = genai.types.ThinkingConfig(
-            thinking_budget=10000,
-        )
+        # Gemini 3.x reasons by default; don't pin a thinking_budget/level
+        # (the parameter shape changed across SDK versions). Just allow more
+        # time for the longer thinking turn.
         config_kwargs["http_options"] = genai.types.HttpOptions(timeout=300_000)
 
     response = client.models.generate_content(
@@ -126,7 +206,10 @@ def _send_anthropic(config: ModelConfig, messages: list[dict], system_prompt: st
         body["system"] = system_prompt
 
     if config.thinking:
-        body["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+        # Adaptive thinking: current Claude models (Opus 4.8 / Sonnet 5) reject
+        # {"type": "enabled", "budget_tokens": N} with a 400 — budget_tokens is
+        # removed. Adaptive is the only on-mode; the model paces its own depth.
+        body["thinking"] = {"type": "adaptive"}
 
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
@@ -158,17 +241,21 @@ def send_message(
     model_key: str,
     messages: list[dict],
     system_prompt: str | None = None,
+    models: dict[str, ModelConfig] | None = None,
 ) -> str:
     """Send conversation history to a model, return response text.
 
     Args:
-        model_key: Key from MODELS dict (e.g., "gpt-4o", "gemini-flash", "claude-sonnet")
+        model_key: Key from the models map (e.g., "gpt", "gemini-pro", "claude-opus")
         messages: List of {"role": "user"|"assistant", "content": "..."} dicts
         system_prompt: Optional system/context prompt
+        models: Resolved models map (builtins + project overrides). Defaults to
+            the builtin set when not provided.
     """
-    if model_key not in MODELS:
-        raise ValueError(f"Unknown model: {model_key}. Available: {list(MODELS.keys())}")
+    models = models or MODELS
+    if model_key not in models:
+        raise ValueError(f"Unknown model: {model_key}. Available: {list(models.keys())}")
 
-    config = MODELS[model_key]
+    config = models[model_key]
     dispatch_fn = _DISPATCH[config.provider]
     return dispatch_fn(config, messages, system_prompt)

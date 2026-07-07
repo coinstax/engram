@@ -447,7 +447,7 @@ def start_consultation(
 
     Args:
         topic: What the consultation is about
-        models: Comma-separated model keys: gpt-4o, gemini-flash, claude-sonnet
+        models: Comma-separated model keys: gpt, claude-opus, gemini-pro (call list_models for the full set)
         system_prompt: Optional context/instructions for all models
         initial_message: If provided, sends this message and returns responses immediately
     """
@@ -488,7 +488,7 @@ def start_consultation_file(
 
     Args:
         file_path: Path to the file to consult about
-        models: Comma-separated model keys: gpt-4o, gemini-flash, claude-sonnet
+        models: Comma-separated model keys: gpt, claude-opus, gemini-pro (call list_models for the full set)
         topic: What to discuss (defaults to "Review: <filename>")
         prompt: Custom prompt/question about the file (defaults to general review)
         system_prompt: Optional additional context/instructions for all models
@@ -619,6 +619,31 @@ def consult_done(
         return result
     finally:
         store.close()
+
+
+@mcp.tool()
+def list_models() -> str:
+    """List models available for consultations (builtin + project overrides).
+
+    Use this before start_consultation to see which model keys exist and which
+    have their API key set in the environment. Projects can add or override
+    models in .engram/models.json.
+    """
+    from engram.providers import resolve_models, model_summary
+    project_dir = Path(os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd()))
+    rows = model_summary(resolve_models(project_dir))
+
+    lines = ["Available consultation models:"]
+    for r in rows:
+        key_flag = "key set" if r["key_present"] else "NO KEY"
+        think = " [thinking]" if r["thinking"] else ""
+        tag = "" if r["source"] == "builtin" else " (custom)"
+        lines.append(
+            f"  {r['key']}: {r['model_id']} ({r['provider']}, {key_flag}, "
+            f"env {r['env_key']}){think}{tag}"
+        )
+    lines.append("Add/override models in .engram/models.json.")
+    return "\n".join(lines)
 
 
 def main():

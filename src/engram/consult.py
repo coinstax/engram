@@ -69,6 +69,9 @@ class ConsultationEngine:
     def __init__(self, store: EventStore, project_dir: Path | None = None):
         self.store = store
         self.project_dir = project_dir or Path.cwd()
+        # Builtin frontier models plus any project overrides from
+        # .engram/models.json — used for validation and dispatch.
+        self.models = providers.resolve_models(self.project_dir)
 
     @staticmethod
     def _generate_id() -> str:
@@ -87,9 +90,9 @@ class ConsultationEngine:
         """Create a new conversation. Returns conv_id."""
         # Validate models
         for m in models:
-            if m not in providers.MODELS:
+            if m not in self.models:
                 raise ValueError(
-                    f"Unknown model: {m}. Available: {list(providers.MODELS.keys())}"
+                    f"Unknown model: {m}. Available: {list(self.models.keys())}"
                 )
 
         conv_id = self._generate_id()
@@ -153,7 +156,7 @@ class ConsultationEngine:
         for model_key in target_models:
             try:
                 response_text = providers.send_message(
-                    model_key, api_messages, system_prompt
+                    model_key, api_messages, system_prompt, models=self.models
                 )
             except Exception as e:
                 response_text = f"[Error from {model_key}: {e}]"

@@ -237,7 +237,7 @@ Add to your agent's MCP configuration:
 }
 ```
 
-The MCP server exposes sixteen tools: `post_event`, `query`, `resolve_event`, `supersede_event`, `reopen_event`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
+The MCP server exposes seventeen tools: `post_event`, `query`, `resolve_event`, `supersede_event`, `reopen_event`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `list_models`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
 
 **Agent instructions (if your framework doesn't auto-load `CLAUDE.md`):**
 
@@ -273,8 +273,10 @@ This project uses Engram for persistent memory across agent sessions.
 - One session per agent — starting a new one ends the previous
 
 ### Consultations (design validation)
-- Use `start_consultation` to get feedback from external AI models (GPT-4o, Gemini, etc.)
+- Call `list_models` (or `engram consult models`) to see available model keys and which API keys are set
+- Use `start_consultation` to get feedback from external AI models (`gpt`, `claude-opus`, `gemini-pro`, `grok`, etc.)
 - Continue with `consult_say`, review with `consult_show`, close with `consult_done`
+- Extend or override the model set per project in `.engram/models.json`
 
 ### Context checkpoints
 - After writing a context file: `save_checkpoint` to record it and enrich with Engram events
@@ -344,7 +346,7 @@ src/engram/
   cli.py         — Click CLI: init, post, query, briefing, checkpoint, session, resolve, supersede, reopen, gc, hooks
   providers.py   — Multi-model provider dispatch (OpenAI, Google, Anthropic, xAI)
   consult.py     — Multi-turn consultation engine with persistent conversations
-  mcp_server.py  — FastMCP server: 13 tools (events, sessions, checkpoints, briefing, consultations)
+  mcp_server.py  — FastMCP server: 17 tools (events, sessions, checkpoints, briefing, consultations)
 ```
 
 **Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema v6 with automatic migration from any prior version on connection.
@@ -391,7 +393,9 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.6.1** — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
 
-**v1.7.0** (current release, 2026-07-06) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and slash-command skills. First launch in an uninitialized project auto-creates `.engram/` and seeds from git history without modifying the user's tracked `CLAUDE.md` (agent guidance rides on the MCP server's `instructions` field and plugin SKILL.md files instead). Python CLI stays first-class for headless/automation use. Currently ships `/engram:briefing`; `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` land next. Also in this cycle: the event-lifecycle tools (`resolve`/`supersede`/`reopen`) are now exposed over MCP, not just the CLI, and events gain an optional `area` tag (schema v6) for grouping work by concept independent of file `scope`. See [plugin/README.md](plugin/README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
+**v1.8.0** (current release, 2026-07-07) — Consultation models refreshed to current frontier flagships (`gpt-5.5`, `claude-opus-4-8`, `claude-sonnet-5`, `gemini-3.1-pro-preview`, `gemini-3.5-flash`, `grok-4.3`) with version-agnostic keys. Model set is now extensible per project via `.engram/models.json`, and `engram consult models` / the `list_models` MCP tool make the available keys discoverable. Fixes a latent 400: the Anthropic provider now uses adaptive thinking (`{"type": "adaptive"}`) instead of the removed `budget_tokens`, which current Claude models reject.
+
+**v1.7.0** (2026-07-06) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and slash-command skills. First launch in an uninitialized project auto-creates `.engram/` and seeds from git history without modifying the user's tracked `CLAUDE.md` (agent guidance rides on the MCP server's `instructions` field and plugin SKILL.md files instead). Python CLI stays first-class for headless/automation use. Currently ships `/engram:briefing`; `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` land next. Also in this cycle: the event-lifecycle tools (`resolve`/`supersede`/`reopen`) are now exposed over MCP, not just the CLI, and events gain an optional `area` tag (schema v6) for grouping work by concept independent of file `scope`. See [plugin/README.md](plugin/README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
 
 **Next after v1.7** — Hierarchical summarization, conflict detection, outcome tracking
 

@@ -572,9 +572,38 @@ def consult(ctx):
     pass
 
 
+@consult.command("models")
+@click.option("--format", "-f", "fmt", default="compact",
+              type=click.Choice(["compact", "json"]))
+@click.pass_context
+def consult_models(ctx, fmt):
+    """List available consultation models (builtin + project overrides)."""
+    import json as _json
+    from engram.providers import resolve_models, model_summary
+    project = ctx.obj["project"]
+    rows = model_summary(resolve_models(project))
+
+    if fmt == "json":
+        click.echo(_json.dumps(rows, indent=2))
+        return
+
+    for r in rows:
+        key_flag = "ok " if r["key_present"] else "no-key"
+        think = " [thinking]" if r["thinking"] else ""
+        tag = "" if r["source"] == "builtin" else " (custom)"
+        click.echo(
+            f"{r['key']:<16} {r['model_id']:<26} {r['provider']:<10} "
+            f"{key_flag:<6} {r['env_key']}{think}{tag}"
+        )
+    click.echo(
+        "\nAdd or override models in .engram/models.json "
+        '({"models": {"<key>": {"provider", "model_id", "env_key"}}}).'
+    )
+
+
 @consult.command("start")
 @click.option("--topic", "-t", default=None, help="Conversation topic (auto-derived from filename if --file is used)")
-@click.option("--models", "-m", required=True, help="Comma-separated model keys (gpt-4o,gemini-flash,claude-sonnet)")
+@click.option("--models", "-m", required=True, help="Comma-separated model keys (gpt,claude-opus,gemini-pro; see 'consult models')")
 @click.option("--system", "-s", default=None, help="System prompt for all models")
 @click.option("--context/--no-context", default=True, help="Auto-assemble project context (default: on)")
 @click.option("--message", "-M", default=None, help="Initial message (sends and gets responses immediately)")
