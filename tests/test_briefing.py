@@ -372,3 +372,23 @@ class TestResolvedWindow:
         all_active = briefing.critical_warnings + briefing.focus_relevant + briefing.other_active
         active_content = [e.content for e in all_active]
         assert "Resolved warning" not in active_content
+
+
+def test_briefing_focus_matches_area(tmp_path):
+    from engram.store import EventStore
+    from engram.briefing import BriefingGenerator
+    from engram.models import Event, EventType
+    from tests.conftest import ts_offset
+
+    store = EventStore(tmp_path / "events.db")
+    store.initialize()
+    try:
+        store.insert(Event(id="", timestamp=ts_offset(1),
+                           event_type=EventType.DECISION, agent_id="t",
+                           content="email cooldown decision",
+                           scope=["src/lib/rate-limit.ts"], area="email-change"))
+        result = BriefingGenerator(store).generate(focus="email-change")
+        contents = [e.content for e in result.focus_relevant]
+        assert "email cooldown decision" in contents
+    finally:
+        store.close()

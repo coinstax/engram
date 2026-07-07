@@ -81,6 +81,8 @@ class BriefingGenerator:
                 if event.id in critical_ids:
                     continue
                 relevance = self._scope_relevance(event, focus)
+                if relevance == 0 and event.area and event.area == focus:
+                    relevance = 3
                 if relevance > 0:
                     focus_relevant.append(event)
                     focus_ids.add(event.id)
