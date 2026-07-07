@@ -205,3 +205,37 @@ class TestEventStore:
         results = store.query_structured(filters)
         assert len(results) == 1
         assert results[0].content == "Related decision"
+
+
+def test_insert_and_read_area(tmp_path):
+    from engram.store import EventStore
+    from engram.models import Event, EventType
+
+    store = EventStore(tmp_path / "events.db")
+    store.initialize()
+    try:
+        e = Event(id="", timestamp="", event_type=EventType.DECISION,
+                  agent_id="test", content="use webhooks",
+                  scope=["src/billing/x.py"], area="billing")
+        store.insert(e)
+        rows = store.recent_by_type(EventType.DECISION)
+        assert rows[0].area == "billing"
+    finally:
+        store.close()
+
+
+def test_area_is_full_text_searchable(tmp_path):
+    from engram.store import EventStore
+    from engram.models import Event, EventType
+
+    store = EventStore(tmp_path / "events.db")
+    store.initialize()
+    try:
+        store.insert(Event(id="", timestamp="", event_type=EventType.DECISION,
+                           agent_id="test", content="unrelated words",
+                           area="emailchange"))
+        hits = store.query_fts("emailchange")
+        assert len(hits) == 1
+        assert hits[0].area == "emailchange"
+    finally:
+        store.close()

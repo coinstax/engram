@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS events (
     content     TEXT NOT NULL
                 CHECK(length(content) <= 2000),
     scope       TEXT,
+    area        TEXT,
     related_ids TEXT,
     status      TEXT NOT NULL DEFAULT 'active'
                 CHECK(status IN ('active','resolved','superseded')),
@@ -40,13 +41,14 @@ CREATE INDEX IF NOT EXISTS idx_events_status    ON events(status);
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
     content,
     scope,
+    area,
     content=events,
     content_rowid=rowid
 );
 
 CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
-    INSERT INTO events_fts(rowid, content, scope)
-    VALUES (new.rowid, new.content, new.scope);
+    INSERT INTO events_fts(rowid, content, scope, area)
+    VALUES (new.rowid, new.content, new.scope, new.area);
 END;
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -270,6 +272,10 @@ class EventStore:
             session_id = row["session_id"]
         except (IndexError, KeyError):
             session_id = None
+        try:
+            area = row["area"]
+        except (IndexError, KeyError):
+            area = None
         return Event(
             id=row["id"],
             timestamp=row["timestamp"],
@@ -277,6 +283,7 @@ class EventStore:
             agent_id=row["agent_id"],
             content=row["content"],
             scope=scope,
+            area=area,
             related_ids=related,
             status=status,
             priority=priority,
@@ -297,10 +304,10 @@ class EventStore:
 
         with self.conn:
             self.conn.execute(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority, session_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, area, related_ids, status, priority, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (event.id, event.timestamp, event.event_type.value,
-                 event.agent_id, event.content, scope_json, related_json,
+                 event.agent_id, event.content, scope_json, event.area, related_json,
                  event.status, event.priority, event.session_id),
             )
         return event
@@ -316,13 +323,13 @@ class EventStore:
             scope_json = json.dumps(e.scope) if e.scope else None
             related_json = json.dumps(e.related_ids) if e.related_ids else None
             rows.append((e.id, e.timestamp, e.event_type.value,
-                         e.agent_id, e.content, scope_json, related_json,
+                         e.agent_id, e.content, scope_json, e.area, related_json,
                          e.status, e.priority, e.session_id))
 
         with self.conn:
             self.conn.executemany(
-                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, related_ids, status, priority, session_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (id, timestamp, event_type, agent_id, content, scope, area, related_ids, status, priority, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
