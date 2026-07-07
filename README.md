@@ -337,9 +337,9 @@ src/engram/
   mcp_server.py  — FastMCP server: 13 tools (events, sessions, checkpoints, briefing, consultations)
 ```
 
-**Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema v5 with automatic migration from any prior version on connection.
+**Storage:** `.engram/events.db` — SQLite with WAL mode for concurrent access, FTS5 virtual table with auto-indexing triggers. Schema v6 with automatic migration from any prior version on connection.
 
-**Event schema:** 12 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `related_ids`, `status`, `priority`, `resolved_reason`, `superseded_by`, `session_id`. Core 7 fields are always populated; lifecycle fields default to sensible values; `session_id` is auto-linked to the active session.
+**Event schema:** 13 fields: `id`, `timestamp`, `event_type`, `agent_id`, `content`, `scope`, `area`, `related_ids`, `status`, `priority`, `resolved_reason`, `superseded_by`, `session_id`. Core 7 fields are always populated; `area` is optional (set explicitly or inferred from `.engram/areas.json`); lifecycle fields default to sensible values; `session_id` is auto-linked to the active session.
 
 **Design decisions:**
 - FTS5 only, no embeddings — covers 95% of queries at <10k events with zero additional dependencies
@@ -381,7 +381,7 @@ The synthesis of all three consultations is in `docs/CONSULTATION_SYNTHESIS.md`.
 
 **v1.6.1** (current release) — Maintenance: consistent `agent_id` on hook-captured events, atomic settings.json writes, `engram hooks uninstall` / `show` commands, `mcp<2.0` upper pin, relative-timestamp test fixtures
 
-**v1.7.0** (in progress, branch `v1.7-plugin`) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and slash-command skills. First launch in an uninitialized project auto-creates `.engram/` and seeds from git history without modifying the user's tracked `CLAUDE.md` (agent guidance rides on the MCP server's `instructions` field and plugin SKILL.md files instead). Python CLI stays first-class for headless/automation use. Currently ships `/engram:briefing`; `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` land next. See [plugin/README.md](plugin/README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
+**v1.7.0** (in progress, branch `v1.7-plugin`) — Claude Code plugin packaging. Ships Engram as a single-install plugin bundle (`plugin/` directory) that auto-wires the MCP server, hooks, and slash-command skills. First launch in an uninitialized project auto-creates `.engram/` and seeds from git history without modifying the user's tracked `CLAUDE.md` (agent guidance rides on the MCP server's `instructions` field and plugin SKILL.md files instead). Python CLI stays first-class for headless/automation use. Currently ships `/engram:briefing`; `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` land next. Also in this cycle: the event-lifecycle tools (`resolve`/`supersede`/`reopen`) are now exposed over MCP, not just the CLI, and events gain an optional `area` tag (schema v6) for grouping work by concept independent of file `scope`. See [plugin/README.md](plugin/README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for scope.
 
 **Next after v1.7** — Hierarchical summarization, conflict detection, outcome tracking
 
