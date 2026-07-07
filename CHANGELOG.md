@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased — v1.7.0 (branch `v1.7-plugin`)
+## v1.7.0 — 2026-07-06
 
-Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` replaces the previous three-step setup (`pip install`, `engram hooks install`, manual MCP config). The Python CLI and `engram-mcp` binary remain first-class — the plugin shells out to them, keeping a single release surface for headless/automation use.
+Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` replaces the previous three-step setup (`pip install`, `engram hooks install`, manual MCP config). The Python CLI and `engram-mcp` binary remain first-class — the plugin shells out to them, keeping a single release surface for headless/automation use. This release also closes lifecycle gaps in the MCP surface and adds an `area` tag for grouping events by concept.
 
-### Added (in progress)
+### Added
 - `plugin/.claude-plugin/plugin.json` — plugin manifest
 - `plugin/.mcp.json` — registers `engram-mcp` with `ENGRAM_PROJECT_DIR=${PWD}`
 - `plugin/hooks/hooks.json` — PostToolUse (Write/Edit/Bash) + SessionStart, mirroring CLI `HOOK_CONFIG`
@@ -16,20 +16,18 @@ Engram ships as a Claude Code plugin bundle at `plugin/`. One `/plugin install` 
 - **Expanded MCP `instructions`** — the FastMCP server description now tells agents to use `query` for targeted recall instead of scrolling the whole briefing, and to keep event status current via the lifecycle tools. Addresses discoverability feedback that `query` and the lifecycle ops were going unused.
 - **Event `area` tag (schema v6)** — events now carry an optional single-string `area`/component tag (e.g. `billing`, `email-change`) that is independent of `scope` (file paths). Set it explicitly (`engram post -A billing`, or `area=` on the MCP `post_event` tool) or let it default from an optional `.engram/areas.json` path→area prefix map. `query --area` / MCP `query(area=...)` filter by it, FTS indexes it, and briefing `focus` now matches an area name as well as file paths. Schema v6 auto-migrates: it adds the column, rebuilds the FTS index, and backfills existing events from the map where a rule matches — `scope` is never modified.
 
-### Fixed (in progress)
+### Fixed
 - **MCP `post_event` no longer silently truncates** — content over 2000 chars now raises a clear `ValueError` (with the actual length and guidance to summarize or split into linked events) instead of quietly slicing to `content[:2000]` and persisting a truncated record. Matches the CLI's DB-level `CHECK(length(content) <= 2000)` which fails loudly.
 
-### Planned before release
-- Remaining MVP skills: `post-decision`, `query`, `checkpoint-save`, `checkpoint-restore`
-- `ENGRAM_CONTEXT_DIRS` env var to make auto-checkpoint dirs configurable
-- Version bump to `1.7.0` across `pyproject.toml`, `src/engram/__init__.py`, `plugin/.claude-plugin/plugin.json`
-- Resolve four open design items with live plugin testing (flagged as warnings in the project's Engram store)
+### Stats
+- 324 tests passing; schema at v6 (auto-migration from any prior version)
+- Version bumped to `1.7.0` across `pyproject.toml`, `src/engram/__init__.py`, `plugin/.claude-plugin/plugin.json`
 
-### Not in v1.7 (deferred)
-- MCP server deprecation
-- Subscription to new hook events (PreCompact/PostCompact, TaskCreated, etc.)
-- Per-subagent event capture
-- Plugin marketplace submission
+### Next after v1.7.0
+- Remaining MVP skills: `/engram:post-decision`, `/engram:query`, `/engram:checkpoint-save`, `/engram:checkpoint-restore` (plugin currently ships `/engram:briefing`)
+- `ENGRAM_CONTEXT_DIRS` env var to make auto-checkpoint dirs configurable
+- Live `claude --plugin-dir` smoke test and resolution of the open design items flagged in the project's Engram store
+- MCP server deprecation; subscription to new hook events (PreCompact/PostCompact, TaskCreated, etc.); per-subagent event capture; plugin marketplace submission
 
 ---
 
