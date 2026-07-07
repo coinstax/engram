@@ -57,3 +57,10 @@ def test_infer_first_matching_path_wins():
 
 def test_infer_no_match_returns_none():
     assert infer_area(["docs/readme.md"], [AreaRule("src/", "code")]) is None
+
+
+def test_infer_duplicate_prefix_first_rule_wins():
+    # Same prefix listed twice: the tie-break uses strict `>` on prefix
+    # length, so the earlier rule wins.
+    rules = [AreaRule("src/", "first"), AreaRule("src/", "second")]
+    assert infer_area(["src/x.py"], rules) == "first"

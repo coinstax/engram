@@ -18,11 +18,11 @@ def load_area_map(project_dir: Path) -> list[AreaRule]:
     return an empty list — inference is best-effort and never fatal.
     """
     path = Path(project_dir) / ".engram" / "areas.json"
-    if not path.exists():
-        return []
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError, ValueError):
+        # Missing file (FileNotFoundError is an OSError), unreadable, or
+        # malformed JSON — all best-effort non-fatal.
         return []
     rules_raw = data.get("rules") if isinstance(data, dict) else None
     if not isinstance(rules_raw, list):
