@@ -21,7 +21,7 @@ The project started as "AgentBus" (an inter-agent message bus), but after consul
 
 ## For Agents: How to Use Engram
 
-If Engram is configured in your environment — either via the Claude Code plugin (one-step install, see Setup below) or manually as an MCP server / CLI — you have thirteen tools available.
+If Engram is configured in your environment — either via the Claude Code plugin (one-step install, see Setup below) or manually as an MCP server / CLI — you have sixteen tools available.
 
 If Claude Code hooks are present (shipped with the plugin, or installed manually via `engram hooks install`), file mutations and bash command outcomes are captured automatically — you rarely need to post `mutation` or `outcome` events by hand.
 
@@ -94,6 +94,16 @@ To auto-populate `area` without setting it by hand, add `.engram/areas.json`:
 
 The longest matching prefix wins. The file is optional; without it, `area`
 is simply whatever you pass explicitly (or empty).
+
+### `resolve_event` / `supersede_event` / `reopen_event` — Keep state live
+
+```
+engram resolve_event(event_id="evt-abc123", reason="Fixed in PR #42")
+engram supersede_event(event_id="evt-abc123", superseded_by="evt-def456")
+engram reopen_event(event_id="evt-abc123")
+```
+
+Events are not just append-only. When a warning is addressed, `resolve_event` it so it stops surfacing as live. When a decision is replaced, post the new one, then `supersede_event` the old with the new id. `reopen_event` if a resolved issue resurfaces. Keeping status current is what keeps briefings showing only the live state instead of accreting stale-but-live-looking entries.
 
 ### `status` — Check system state
 
@@ -227,7 +237,7 @@ Add to your agent's MCP configuration:
 }
 ```
 
-The MCP server exposes thirteen tools: `post_event`, `query`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
+The MCP server exposes sixteen tools: `post_event`, `query`, `resolve_event`, `supersede_event`, `reopen_event`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
 
 **Agent instructions (if your framework doesn't auto-load `CLAUDE.md`):**
 
