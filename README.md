@@ -199,7 +199,24 @@ pip install -e ".[consult]"   # openai, google-genai, httpx, python-dotenv
 pip install -e ".[all]"       # mcp + consult
 ```
 
-Set the provider keys you plan to use (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`) in the environment or a project `.env`. Run `engram consult models` to see which keys are detected. Without the SDKs, a consult fails with a message telling you to install `engram[consult]`.
+Then set the API key(s) for the provider(s) you want to use, in the environment or a project `.env`. You only need keys for the providers you actually consult:
+
+| Model keys | Provider | Env var | Get an API key | SDK |
+| --- | --- | --- | --- | --- |
+| `gpt`, `gpt-4o`, `o3` | OpenAI | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | [openai](https://pypi.org/project/openai/) |
+| `claude-opus`, `claude-sonnet` | Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) | via `httpx` (no SDK) |
+| `gemini-pro`, `gemini-flash` | Google | `GOOGLE_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | [google-genai](https://pypi.org/project/google-genai/) |
+| `grok` | xAI | `XAI_API_KEY` | [console.x.ai](https://console.x.ai) | via `openai` (OpenAI-compatible) |
+
+```bash
+# example .env in your project root
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=...
+XAI_API_KEY=xai-...
+```
+
+Run `engram consult models` to see which keys are detected (it loads `.env`). Without the SDKs installed, a consult fails with a message telling you to install `engram[consult]`.
 
 **Initialize in your project:**
 
