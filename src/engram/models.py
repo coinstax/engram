@@ -20,6 +20,7 @@ class Event:
     agent_id: str
     content: str
     scope: list[str] | None = None
+    area: str | None = None
     related_ids: list[str] | None = None
     status: str = "active"
     priority: str = "normal"
