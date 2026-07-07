@@ -92,6 +92,15 @@ class TestPost:
         assert len(data) == 1
         assert data[0]["event_type"] == "discovery"
 
+    def test_post_with_explicit_area(self, runner, git_project):
+        runner.invoke(cli, ["-p", str(git_project), "init"])
+        result = runner.invoke(cli, [
+            "-p", str(git_project), "post",
+            "-t", "decision", "-c", "use webhooks", "-A", "billing",
+        ])
+        assert result.exit_code == 0
+        assert "{billing}" in result.output
+
 
 class TestQuery:
 

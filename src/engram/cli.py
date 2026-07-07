@@ -11,6 +11,7 @@ from engram.store import EventStore
 from engram.query import QueryEngine, parse_event_types
 from engram.briefing import BriefingGenerator
 from engram.init import perform_init
+from engram.areas import load_area_map, infer_area
 from engram.formatting import (
     format_compact, format_json,
     format_briefing_compact, format_briefing_json,
@@ -116,6 +117,9 @@ def init(ctx, max_commits):
               type=click.Choice(["discovery", "decision", "warning", "mutation", "outcome"]))
 @click.option("--content", "-c", required=True, help="Event content (max 2000 chars)")
 @click.option("--scope", "-s", multiple=True, help="File path(s)")
+@click.option("--area", "-A", "area", default=None,
+              help="Conceptual area/component (e.g. billing). Inferred from "
+                   ".engram/areas.json if omitted.")
 @click.option("--agent", "-a", default=None, help="Agent identifier")
 @click.option("--related", "-r", multiple=True, help="Related event ID(s)")
 @click.option("--priority", "-p", default="normal",
@@ -124,7 +128,7 @@ def init(ctx, max_commits):
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def post(ctx, event_type, content, scope, agent, related, priority, fmt):
+def post(ctx, event_type, content, scope, area, agent, related, priority, fmt):
     """Post an event to the store."""
     project = ctx.obj["project"]
     store = _get_store(project)
@@ -136,6 +140,8 @@ def post(ctx, event_type, content, scope, agent, related, priority, fmt):
     agent_id = agent or os.environ.get("ENGRAM_AGENT_ID", "cli")
     scope_list = list(scope) if scope else None
     related_list = list(related) if related else None
+    if area is None:
+        area = infer_area(scope_list, load_area_map(project))
 
     event = Event(
         id="", timestamp="",
@@ -143,6 +149,7 @@ def post(ctx, event_type, content, scope, agent, related, priority, fmt):
         agent_id=agent_id,
         content=content,
         scope=scope_list,
+        area=area,
         related_ids=related_list,
         priority=priority,
     )

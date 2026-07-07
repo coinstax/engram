@@ -25,9 +25,10 @@ def format_event_compact(event: Event) -> str:
     ts = _short_timestamp(event.timestamp)
     scope = _scope_str(event.scope)
     scope_part = f" {scope} —" if scope else " —"
+    area_part = f" {{{event.area}}}" if getattr(event, "area", None) else ""
     links = f" (links: {len(event.related_ids)})" if event.related_ids else ""
     priority_tag = f" [{event.priority.upper()}]" if event.priority not in ("normal", None) else ""
-    return f"[{ts}] [{event.event_type.value}]{priority_tag} [{event.agent_id}]{scope_part} {event.content}{links}"
+    return f"[{ts}] [{event.event_type.value}]{priority_tag} [{event.agent_id}]{scope_part}{area_part} {event.content}{links}"
 
 
 def format_compact(events: list[Event]) -> str:

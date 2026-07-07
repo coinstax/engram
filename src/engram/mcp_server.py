@@ -10,6 +10,7 @@ from engram.models import Event, EventType
 from engram.store import EventStore
 from engram.query import QueryEngine, parse_event_types
 from engram.briefing import BriefingGenerator
+from engram.areas import load_area_map, infer_area
 from engram.formatting import (
     format_compact, format_json,
     format_briefing_compact, format_briefing_json,
@@ -65,6 +66,7 @@ def post_event(
     content: str,
     agent_id: str = "claude-code",
     scope: list[str] | None = None,
+    area: str | None = None,
     related_ids: list[str] | None = None,
     priority: str = "normal",
     session_id: str | None = None,
@@ -83,6 +85,9 @@ def post_event(
         content: Description of the event (max 2000 chars)
         agent_id: Identifier for this agent session
         scope: List of file paths this event relates to
+        area: Conceptual area/component this event belongs to (e.g. "billing",
+            "email-change"). Independent of scope (which is file paths). If
+            omitted, inferred from .engram/areas.json when a rule matches.
         related_ids: List of related event IDs (for linking outcomes to decisions, etc.)
         priority: Event priority: critical, high, normal, low (default: normal)
         session_id: Link event to a session (defaults to active session for agent if not provided)
@@ -96,6 +101,10 @@ def post_event(
                 f"first, then reference its id via related_ids)."
             )
 
+        if area is None:
+            project_dir = os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd())
+            area = infer_area(scope, load_area_map(Path(project_dir)))
+
         # Auto-link to active session if not specified
         if session_id is None:
             active = store.get_active_session(agent_id)
@@ -108,6 +117,7 @@ def post_event(
             agent_id=agent_id,
             content=content,
             scope=scope,
+            area=area,
             related_ids=related_ids,
             priority=priority,
             session_id=session_id,

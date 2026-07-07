@@ -62,6 +62,25 @@ class TestMCPTools:
         assert "[discovery]" in result
         assert "performance bottleneck" in result
 
+    def test_post_event_explicit_area(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        import json as _json
+        post_event(event_type="decision", content="cooldown rule",
+                   scope=["src/x.py"], area="email-change")
+        row = _json.loads(query(text="cooldown", format="json"))[0]
+        assert row["area"] == "email-change"
+
+    def test_post_event_infers_area_from_map(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        import json as _json
+        # Write an area map into the project the fixture set up.
+        (mcp_project / ".engram" / "areas.json").write_text(
+            _json.dumps({"rules": [{"prefix": "src/billing/", "area": "billing"}]}))
+        post_event(event_type="decision", content="switch processor",
+                   scope=["src/billing/pay.py"])
+        row = _json.loads(query(text="processor", format="json"))[0]
+        assert row["area"] == "billing"
+
     def test_post_event_rejects_oversized_content(self, mcp_project):
         from engram.mcp_server import post_event, query
         with pytest.raises(ValueError, match="2500 chars"):
