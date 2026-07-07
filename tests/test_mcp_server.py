@@ -114,6 +114,14 @@ class TestMCPTools:
         result = query(text="nonexistent_xyz_query")
         assert "(no events)" in result
 
+    def test_query_by_area(self, mcp_project):
+        from engram.mcp_server import post_event, query
+        post_event(event_type="decision", content="billing thing", area="billing")
+        post_event(event_type="decision", content="account thing", area="account")
+        result = query(area="billing")
+        assert "billing thing" in result
+        assert "account thing" not in result
+
     def test_briefing_compact(self, mcp_project):
         from engram.mcp_server import briefing
         result = briefing()

@@ -120,6 +120,23 @@ class TestQueryEngine:
         assert len(results) == 1
         assert results[0].content == "Related decision"
 
+    def test_query_filter_by_area(self, tmp_path):
+        from engram.store import EventStore
+        from engram.models import Event
+
+        store = EventStore(tmp_path / "events.db")
+        store.initialize()
+        try:
+            store.insert(Event(id="", timestamp="", event_type=EventType.DECISION,
+                               agent_id="t", content="a", area="billing"))
+            store.insert(Event(id="", timestamp="", event_type=EventType.DECISION,
+                               agent_id="t", content="b", area="account"))
+            results = QueryEngine(store).execute(area="billing")
+            assert len(results) == 1
+            assert results[0].content == "a"
+        finally:
+            store.close()
+
 
 class TestFormatting:
 

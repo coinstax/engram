@@ -214,6 +214,7 @@ def query(
     text: str | None = None,
     event_type: str | None = None,
     scope: str | None = None,
+    area: str | None = None,
     since: str | None = None,
     agent_id: str | None = None,
     related_to: str | None = None,
@@ -226,6 +227,7 @@ def query(
         text: Full-text search query
         event_type: Filter by type (comma-separated): discovery,decision,warning,mutation,outcome
         scope: Filter by file path prefix
+        area: Filter by conceptual area (exact match)
         since: Time filter: "24h", "7d", "2w", or ISO date
         agent_id: Filter by agent identifier
         related_to: Find events linked to this event ID
@@ -238,7 +240,7 @@ def query(
         engine = QueryEngine(store)
         results = engine.execute(
             text=text, event_types=types, agent_id=agent_id,
-            scope=scope, since=since, limit=limit, related_to=related_to,
+            scope=scope, area=area, since=since, limit=limit, related_to=related_to,
         )
         if format == "json":
             return format_json(results)

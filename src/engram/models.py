@@ -57,6 +57,7 @@ class QueryFilter:
     event_types: list[EventType] | None = None
     agent_id: str | None = None
     scope: str | None = None
+    area: str | None = None
     since: str | None = None
     limit: int = 50
     related_to: str | None = None

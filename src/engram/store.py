@@ -387,7 +387,8 @@ class EventStore:
     def query_structured(self, filters: QueryFilter) -> list[Event]:
         """Query with optional FTS + structured filters."""
         if filters.text and not filters.event_types and not filters.agent_id \
-                and not filters.scope and not filters.since and not filters.related_to:
+                and not filters.scope and not filters.area and not filters.since \
+                and not filters.related_to:
             return self.query_fts(filters.text, filters.limit)
 
         conditions = []
@@ -411,6 +412,10 @@ class EventStore:
         if filters.scope:
             conditions.append("e.scope LIKE ?")
             params.append(f"%{filters.scope}%")
+
+        if filters.area:
+            conditions.append("e.area = ?")
+            params.append(filters.area)
 
         if filters.since:
             conditions.append("e.timestamp >= ?")

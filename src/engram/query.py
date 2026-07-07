@@ -65,11 +65,12 @@ class QueryEngine:
                 event_types: list[EventType] | None = None,
                 agent_id: str | None = None,
                 scope: str | None = None,
+                area: str | None = None,
                 since: str | None = None,
                 limit: int = 50,
                 related_to: str | None = None) -> list[Event]:
         """Execute a query with normalized parameters."""
-        if related_to and not any([text, event_types, agent_id, scope, since]):
+        if related_to and not any([text, event_types, agent_id, scope, area, since]):
             return self.store.query_related(related_to, limit)
 
         normalized_since = parse_since(since) if since else None
@@ -79,6 +80,7 @@ class QueryEngine:
             event_types=event_types,
             agent_id=agent_id,
             scope=scope,
+            area=area,
             since=normalized_since,
             limit=limit,
             related_to=related_to,

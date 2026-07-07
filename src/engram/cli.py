@@ -167,6 +167,7 @@ def post(ctx, event_type, content, scope, area, agent, related, priority, fmt):
 @click.argument("text", required=False)
 @click.option("--type", "-t", "event_type", default=None, help="Event type(s), comma-separated")
 @click.option("--scope", "-s", default=None, help="Scope path prefix")
+@click.option("--area", "-A", default=None, help="Filter by conceptual area")
 @click.option("--since", default=None, help="Time filter: 24h, 7d, or ISO date")
 @click.option("--agent", "-a", default=None, help="Filter by agent")
 @click.option("--related-to", default=None, help="Find events related to this event ID")
@@ -174,7 +175,7 @@ def post(ctx, event_type, content, scope, area, agent, related, priority, fmt):
 @click.option("--format", "-f", "fmt", default="compact",
               type=click.Choice(["compact", "json"]))
 @click.pass_context
-def query(ctx, text, event_type, scope, since, agent, related_to, limit, fmt):
+def query(ctx, text, event_type, scope, area, since, agent, related_to, limit, fmt):
     """Query events. Supports FTS text and/or structured filters."""
     project = ctx.obj["project"]
     store = _get_store(project)
@@ -183,7 +184,7 @@ def query(ctx, text, event_type, scope, since, agent, related_to, limit, fmt):
     engine = QueryEngine(store)
     results = engine.execute(
         text=text, event_types=types, agent_id=agent,
-        scope=scope, since=since, limit=limit, related_to=related_to,
+        scope=scope, area=area, since=since, limit=limit, related_to=related_to,
     )
 
     if fmt == "json":
