@@ -70,6 +70,31 @@ engram query(related_to="evt-abc123")
 
 Full-text search plus structured filters. Filters combine with AND logic. Use this when you need specific context beyond what the briefing provides.
 
+### Area tags
+
+Every event can carry an optional `area` — a conceptual component tag
+(`billing`, `email-change`) independent of the file `scope`. It makes a
+feature that spans many files across sessions recallable in one query:
+
+```bash
+engram post -t decision -c "cooldown on resend" -s src/lib/rate-limit.ts -A email-change
+engram query --area email-change
+```
+
+To auto-populate `area` without setting it by hand, add `.engram/areas.json`:
+
+```json
+{
+  "rules": [
+    { "prefix": "src/http/routes/me/", "area": "account" },
+    { "prefix": "src/billing/", "area": "billing" }
+  ]
+}
+```
+
+The longest matching prefix wins. The file is optional; without it, `area`
+is simply whatever you pass explicitly (or empty).
+
 ### `status` — Check system state
 
 ```
