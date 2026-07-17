@@ -338,8 +338,10 @@ class TestHookCommands:
 
         store = EventStore(git_project / ".engram" / "events.db")
         events = store.recent_by_type(EventType.MUTATION, limit=10)
-        assert len(events) >= 1
-        assert "src/foo.py" in events[0].content
+        # Don't assume positional order: git seeding creates same-second
+        # "Initial commit" mutations, so the tie-break with the hook event is
+        # undefined. Assert the hook captured the write, not that it sorts first.
+        assert any("src/foo.py" in e.content for e in events)
         store.close()
 
     def test_hook_session_start(self, runner, git_project):
