@@ -9,7 +9,7 @@ This directory packages Engram as a Claude Code plugin bundle. One install wires
 | Path | Purpose |
 |---|---|
 | `.claude-plugin/plugin.json` | Plugin manifest (name, version, keywords) |
-| `.mcp.json` | Registers the `engram-mcp` server; injects `ENGRAM_PROJECT_DIR=${PWD}` |
+| `.mcp.json` | Registers the `engram-mcp` server (resolves the project dir from its working directory; set `ENGRAM_PROJECT_DIR` to override) |
 | `hooks/hooks.json` | PostToolUse (Write/Edit/Bash) + SessionStart, same commands as CLI-installed hooks |
 | `skills/<name>/SKILL.md` | User- and model-invokable slash commands (e.g., `/engram:briefing`) |
 

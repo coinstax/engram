@@ -78,7 +78,18 @@ def _get_store() -> EventStore:
     first tool call of a fresh plugin install). CLAUDE.md is intentionally
     not touched — same rationale as the hook path.
     """
-    project_dir = os.environ.get("ENGRAM_PROJECT_DIR", os.getcwd())
+    raw = os.environ.get("ENGRAM_PROJECT_DIR")
+    if raw is not None and "${" in raw:
+        # An MCP/hook config passed a literal like "${PWD}" that the shell
+        # never expanded — common on Windows, where cmd.exe/PowerShell don't
+        # set PWD. Fail loudly instead of silently creating a junk directory
+        # named "${PWD}" and reading an empty DB inside it.
+        raise ValueError(
+            f"ENGRAM_PROJECT_DIR contains an unexpanded shell variable: {raw!r}. "
+            f"Unset ENGRAM_PROJECT_DIR to use the current directory, or set it "
+            f"to a real absolute path."
+        )
+    project_dir = raw or os.getcwd()
     project_path = Path(project_dir)
     db_path = project_path / ENGRAM_DIR / DB_NAME
     if not db_path.exists():

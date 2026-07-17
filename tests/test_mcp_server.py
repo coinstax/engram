@@ -290,6 +290,14 @@ class TestMCPAutoInit:
             else:
                 os.environ["ENGRAM_PROJECT_DIR"] = old_env
 
+    def test_get_store_rejects_unexpanded_project_dir(self, monkeypatch):
+        """A literal '${PWD}' (unexpanded on Windows) must fail loudly, not
+        silently create a junk dir and read an empty DB."""
+        from engram.mcp_server import _get_store
+        monkeypatch.setenv("ENGRAM_PROJECT_DIR", "${PWD}")
+        with pytest.raises(ValueError, match="unexpanded shell variable"):
+            _get_store()
+
     def test_get_store_auto_init_failure_raises_filenotfound(self, tmp_path, monkeypatch):
         """If perform_init fails, the legacy FileNotFoundError surfaces —
         user experience matches the pre-auto-init behavior for error cases."""

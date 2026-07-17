@@ -8,6 +8,10 @@ Adds a safe mode for the MCP server: give an agent project memory without the ab
 - **MCP safe mode** — set `ENGRAM_SAFE_MODE=1` (or use the new `engram-mcp-safe` console script) to expose only the eleven deterministic local project-memory tools and omit the six consultation tools (`list_models`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`) that call external providers or read API keys. Tools are gated at registration time; the omitted functions stay importable but are never advertised over MCP. `status` now reports `"external_llm_tools"` (`false` in safe mode).
 - **`engram init --no-claude-md`** — seed the project without creating or modifying `CLAUDE.md`, for non-Claude integrations.
 
+### Fixed
+- **Plugin silently broke on Windows (#1)** — `plugin/.mcp.json` set `ENGRAM_PROJECT_DIR=${PWD}`. `PWD` is only set by bash; cmd.exe/PowerShell never define it, so `engram-mcp` received the literal string `"${PWD}"`, resolved it as a relative path, and created an empty `events.db` in a junk `${PWD}/` directory beside the real one — `briefing` returned empty and looked like "no memory." The env block did no work on any platform (on macOS/Linux `${PWD}` only ever expanded to the same cwd the server already defaults to), so it is now removed; the server resolves the project dir from its working directory via `os.getcwd()`.
+- **Unexpanded project dir now fails loudly** — `_get_store` raises a clear error when `ENGRAM_PROJECT_DIR` contains an unexpanded `${...}` literal, instead of silently initializing an empty database in a bogus path.
+
 ### Notes
 - Inspired by the `c2technology/engram` fork's Hermes-safe entry point, reworked as an in-server toggle rather than a second ~200-line server module.
 
