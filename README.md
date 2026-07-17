@@ -144,7 +144,7 @@ The content should be self-contained. Future agents reading it won't have your c
 Engram ships in two forms. Pick the one that matches your environment:
 
 - **Option 1: Claude Code plugin** — single-install bundle that auto-wires the MCP server, hooks, and slash-command skills. Recommended for Claude Code users.
-- **Option 2: Python package** — `pip install engram`, CLI-only or configured as an MCP server for other clients (Cline, Cursor, Continue, custom LLM apps). Use for headless automation or any environment that isn't Claude Code.
+- **Option 2: Python package** — install from source (see below), CLI-only or configured as an MCP server for other clients (Cline, Cursor, Continue, custom LLM apps). Use for headless automation or any environment that isn't Claude Code. (Not yet on PyPI — the `engram` name there is an unrelated placeholder package; don't `pip install engram`.)
 
 Both paths share the same Python package underneath; the plugin is packaging + wiring on top. You can switch between them per project.
 

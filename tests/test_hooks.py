@@ -65,6 +65,24 @@ class TestFileMutationHook:
         assert events[0].agent_id == "claude-code"
         store.close()
 
+    def test_absolute_path_outside_project_is_not_captured(self, hook_project):
+        # A Write/Edit to a file outside the project (scratchpad, another repo)
+        # must not land in this project's memory. Sibling of the project dir,
+        # so it is genuinely outside it.
+        outside = hook_project.parent / "outside-repo" / "notes.py"
+        stdin_data = {
+            "session_id": "sess-abc12345",
+            "cwd": str(hook_project),
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(outside)},
+            "tool_response": {"success": True},
+        }
+        handle_post_tool_use(stdin_data, hook_project)
+
+        store = EventStore(hook_project / ".engram" / "events.db")
+        assert store.recent_by_type(EventType.MUTATION, limit=10) == []
+        store.close()
+
     def test_edit_tool_creates_mutation_event(self, hook_project):
         stdin_data = {
             "session_id": "sess-abc12345",

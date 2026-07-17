@@ -119,6 +119,11 @@ class GitBootstrapper:
                         agent_id="git-bootstrap",
                         content=f"Project {filename}: {truncated}",
                         scope=[filename],
+                        # Low priority: this is a full doc dump that would
+                        # otherwise dominate briefings. Kept (unlike dropping it)
+                        # so non-Claude MCP agents that don't auto-load CLAUDE.md
+                        # still get a project overview, just not front-and-center.
+                        priority="low",
                     ))
                 except Exception:
                     pass

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.1 — 2026-07-17
+
+Follow-ups from the issue #1 triage — the separate concerns listed there but not fixed in the Windows patch.
+
+### Fixed
+- **Out-of-project mutations no longer captured** — the file-mutation hook stored an absolute path verbatim when it fell outside the project, so scratchpad temp files and edits to unrelated repos leaked into this project's memory. Absolute paths outside the project dir are now skipped; relative paths are still treated as project-relative.
+
+### Changed
+- **git-bootstrap doc seeding demoted to low priority** — the seeded `README.md` / `CLAUDE.md` overview events are now `priority: low` so they stop dominating briefings. Still seeded (not dropped), so non-Claude MCP agents that don't auto-load `CLAUDE.md` keep the project overview.
+- **`engram init` hooks hint** — now notes that plugin users should skip `engram hooks install` (the plugin ships its own hooks; running both double-captures events).
+
+### Docs
+- **PyPI placeholder warning** — the `engram` name on PyPI is an unrelated placeholder package; the install section no longer presents `pip install engram` as a working command and points at the from-source install instead.
+
 ## v1.9.0 — 2026-07-17
 
 Adds a safe mode for the MCP server: give an agent project memory without the ability to reach external LLM providers or read API keys from the environment. A single server, gated by an env var — no duplicated entry point to drift out of sync.

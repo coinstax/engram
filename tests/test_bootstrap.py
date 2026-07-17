@@ -88,6 +88,8 @@ class TestGitBootstrapper:
         doc_events = [e for e in events if "README.md" in e.content]
         assert len(doc_events) >= 1
         assert "Test Project" in doc_events[0].content
+        # Demoted so the full doc dump doesn't dominate briefings.
+        assert doc_events[0].priority == "low"
 
     def test_detect_project_name_directory(self, git_repo):
         bootstrapper = GitBootstrapper(git_repo)

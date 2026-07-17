@@ -113,7 +113,9 @@ def init(ctx, max_commits, no_claude_md):
         claude_msg = _auto_write_claude_md(project)
         click.echo(claude_msg)
     click.echo(
-        "Run 'engram hooks install' to enable passive observation via Claude Code hooks."
+        "Run 'engram hooks install' to enable passive observation via Claude Code "
+        "hooks. (Skip this if you use the Engram plugin — it ships its own hooks; "
+        "running both double-captures events.)"
     )
 
 

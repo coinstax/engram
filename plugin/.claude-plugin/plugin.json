@@ -1,6 +1,6 @@
 {
   "name": "engram",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Local-first project memory for AI coding agents. Passive capture of file mutations and bash outcomes, structured briefings at session start, decisions/warnings/discoveries searchable across sessions, optional multi-model design consultations.",
   "author": {
     "name": "Colin Mackie"

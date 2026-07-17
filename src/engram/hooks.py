@@ -258,10 +258,16 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     # forward slashes: scope prefixes are forward-slash throughout Engram
     # (queries, briefings, areas.json), so a Windows-native "src\foo.py" would
     # silently never match a "src/" scope filter.
+    p = Path(file_path)
     try:
-        rel_path = Path(file_path).relative_to(project_dir).as_posix()
+        rel_path = p.relative_to(project_dir).as_posix()
     except ValueError:
-        rel_path = Path(file_path).as_posix()
+        # An absolute path outside the project is not this project's memory
+        # (scratchpad temp files, edits to unrelated repos) — skip it. A
+        # relative path we can't resolve is assumed project-relative.
+        if p.is_absolute():
+            return
+        rel_path = p.as_posix()
 
     if _should_debounce(project_dir, rel_path):
         return
