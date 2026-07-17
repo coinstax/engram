@@ -11,6 +11,10 @@ Adds a safe mode for the MCP server: give an agent project memory without the ab
 ### Fixed
 - **Plugin silently broke on Windows (#1)** — `plugin/.mcp.json` set `ENGRAM_PROJECT_DIR=${PWD}`. `PWD` is only set by bash; cmd.exe/PowerShell never define it, so `engram-mcp` received the literal string `"${PWD}"`, resolved it as a relative path, and created an empty `events.db` in a junk `${PWD}/` directory beside the real one — `briefing` returned empty and looked like "no memory." The env block did no work on any platform (on macOS/Linux `${PWD}` only ever expanded to the same cwd the server already defaults to), so it is now removed; the server resolves the project dir from its working directory via `os.getcwd()`.
 - **Unexpanded project dir now fails loudly** — `_get_store` raises a clear error when `ENGRAM_PROJECT_DIR` contains an unexpanded `${...}` literal, instead of silently initializing an empty database in a bogus path.
+- **Hooks store POSIX paths on Windows** — the mutation hook recorded scope/paths via `str(Path.relative_to())`, which yields backslashes (`src\foo.py`) on Windows. Since scope prefixes are forward-slash everywhere in Engram, a Windows agent's captured events silently never matched a `src/` scope filter and the `.claude/context/` auto-checkpoint never fired. Now normalized with `as_posix()`. Caught by the new Windows CI leg.
+
+### Infrastructure
+- **Cross-platform CI** — GitHub Actions matrix (ubuntu/macOS/Windows × Python 3.12/3.13) runs the unit tests and an end-to-end MCP plugin smoke (`scripts/e2e_mcp_smoke.py`) that drives the `engram-mcp` console script over stdio the way Claude Code loads the plugin — verifying it reads the right DB, round-trips a write, errors loudly on an unexpanded `${PWD}`, and leaves no junk directory. The repo previously had no CI, which is how the Windows path bugs shipped.
 
 ### Notes
 - Inspired by the `c2technology/engram` fork's Hermes-safe entry point, reworked as an in-server toggle rather than a second ~200-line server module.
