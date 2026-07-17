@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.9.0 — 2026-07-16
+
+Adds a safe mode for the MCP server: give an agent project memory without the ability to reach external LLM providers or read API keys from the environment. A single server, gated by an env var — no duplicated entry point to drift out of sync.
+
+### Added
+- **MCP safe mode** — set `ENGRAM_SAFE_MODE=1` (or use the new `engram-mcp-safe` console script) to expose only the eleven deterministic local project-memory tools and omit the six consultation tools (`list_models`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`) that call external providers or read API keys. Tools are gated at registration time; the omitted functions stay importable but are never advertised over MCP. `status` now reports `"external_llm_tools"` (`false` in safe mode).
+- **`engram init --no-claude-md`** — seed the project without creating or modifying `CLAUDE.md`, for non-Claude integrations.
+
+### Notes
+- Inspired by the `c2technology/engram` fork's Hermes-safe entry point, reworked as an in-server toggle rather than a second ~200-line server module.
+
 ## v1.8.0 — 2026-07-07
 
 Consultation models are refreshed to current frontier flagships and the curated set is now extensible per project, so it never goes fully stale. Fixes a latent break: the Anthropic provider still requested extended thinking with `budget_tokens`, which current Claude models reject with a 400 — every Claude consult would have failed once the model IDs advanced.

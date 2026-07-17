@@ -265,6 +265,28 @@ Add to your agent's MCP configuration:
 
 The MCP server exposes seventeen tools: `post_event`, `query`, `resolve_event`, `supersede_event`, `reopen_event`, `briefing`, `status`, `session_start`, `session_end`, `list_sessions`, `save_checkpoint`, `list_models`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`.
 
+**Safe mode (memory without external LLM access):**
+
+To give an agent project memory but no ability to call external LLM providers or read API keys from the environment, run the server in safe mode. This drops the six consultation tools (`list_models`, `start_consultation`, `start_consultation_file`, `consult_say`, `consult_show`, `consult_done`), leaving the eleven deterministic local project-memory tools. Two equivalent ways:
+
+- Use the `engram-mcp-safe` console script instead of `engram-mcp`, or
+- Set `ENGRAM_SAFE_MODE=1` in the server's environment.
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "/path/to/your/venv/bin/engram-mcp-safe",
+      "env": {
+        "ENGRAM_PROJECT_DIR": "/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+`status` reports `"external_llm_tools": false` when safe mode is active. For non-Claude integrations, `engram init --no-claude-md` seeds the project without creating or modifying `CLAUDE.md`.
+
 **Agent instructions (if your framework doesn't auto-load `CLAUDE.md`):**
 
 `engram init` writes this block to your project's `CLAUDE.md`. If your agent framework reads instructions from a different file, copy it there:

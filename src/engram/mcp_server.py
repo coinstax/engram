@@ -19,7 +19,23 @@ from engram.formatting import (
 ENGRAM_DIR = ".engram"
 DB_NAME = "events.db"
 
-mcp = FastMCP("engram", instructions=(
+
+def _safe_mode_enabled() -> bool:
+    """Whether safe mode is requested via the ENGRAM_SAFE_MODE env var.
+
+    Safe mode exposes only deterministic local project-memory tools and
+    omits every tool that can reach an external LLM provider or read API
+    keys from the environment. Intended for agents that should have memory
+    without network + credential access. Evaluated once at import time.
+    """
+    return os.environ.get("ENGRAM_SAFE_MODE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+SAFE_MODE = _safe_mode_enabled()
+
+_INSTRUCTIONS = (
     "Engram is the project memory system. Use it to record decisions, "
     "discoveries, warnings, and changes.\n\n"
     "Reading: run 'briefing' at the start of a session for critical + active "
@@ -31,7 +47,27 @@ mcp = FastMCP("engram", instructions=(
     "replaced, post the new decision, then 'supersede_event' the old one with "
     "the new id. Use 'reopen_event' if a resolved issue resurfaces. Keeping "
     "status current is what keeps briefings showing only the live state."
-))
+)
+if SAFE_MODE:
+    _INSTRUCTIONS += (
+        "\n\nThis server runs in safe mode: consultation tools that call "
+        "external LLM providers are disabled."
+    )
+
+mcp = FastMCP("engram", instructions=_INSTRUCTIONS)
+
+
+def _consult_tool(fn):
+    """Register a consultation tool unless safe mode is on.
+
+    In safe mode the function is left importable but is not advertised over
+    MCP, so an agent restricted to this server cannot invoke external LLM
+    providers or read API keys. Outside safe mode it registers exactly like
+    @mcp.tool().
+    """
+    if SAFE_MODE:
+        return fn
+    return mcp.tool()(fn)
 
 
 def _get_store() -> EventStore:
@@ -300,6 +336,7 @@ def status() -> str:
             "last_activity": store.last_activity(),
             "initialized_at": store.get_meta("initialized_at") or "unknown",
             "db_size_bytes": db_path.stat().st_size,
+            "external_llm_tools": not SAFE_MODE,
         }, indent=2)
     finally:
         store.close()
@@ -433,7 +470,7 @@ def save_checkpoint(
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def start_consultation(
     topic: str,
     models: str,
@@ -473,7 +510,7 @@ def start_consultation(
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def start_consultation_file(
     file_path: str,
     models: str,
@@ -537,7 +574,7 @@ def start_consultation_file(
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def consult_say(
     conv_id: str,
     message: str,
@@ -568,7 +605,7 @@ def consult_say(
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def consult_show(conv_id: str) -> str:
     """Show the full history of a consultation.
 
@@ -596,7 +633,7 @@ def consult_show(conv_id: str) -> str:
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def consult_done(
     conv_id: str,
     summary: str | None = None,
@@ -621,7 +658,7 @@ def consult_done(
         store.close()
 
 
-@mcp.tool()
+@_consult_tool
 def list_models() -> str:
     """List models available for consultations (builtin + project overrides).
 

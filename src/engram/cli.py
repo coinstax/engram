@@ -90,8 +90,10 @@ def cli(ctx, project):
 
 @cli.command()
 @click.option("--max-commits", default=100, help="Max git commits to mine")
+@click.option("--no-claude-md", is_flag=True,
+              help="Do not create or modify CLAUDE.md (for non-Claude integrations).")
 @click.pass_context
-def init(ctx, max_commits):
+def init(ctx, max_commits, no_claude_md):
     """Initialize Engram in this project. Seeds from git history."""
     project = ctx.obj["project"]
 
@@ -105,8 +107,11 @@ def init(ctx, max_commits):
         f"Engram initialized for '{result.project_name}'. "
         f"{result.events_seeded} events seeded from git history."
     )
-    claude_msg = _auto_write_claude_md(project)
-    click.echo(claude_msg)
+    if no_claude_md:
+        click.echo("Skipped CLAUDE.md update (--no-claude-md).")
+    else:
+        claude_msg = _auto_write_claude_md(project)
+        click.echo(claude_msg)
     click.echo(
         "Run 'engram hooks install' to enable passive observation via Claude Code hooks."
     )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engram"
-version = "1.8.0"
+version = "1.9.0"
 description = "Local-first project memory for AI coding agents"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,7 @@ all = ["mcp>=1.0,<2.0", "openai>=1.0", "google-genai>=1.0", "httpx>=0.25", "pyth
 [project.scripts]
 engram = "engram.cli:cli"
 engram-mcp = "engram.mcp_server:main"
+engram-mcp-safe = "engram.mcp_safe:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

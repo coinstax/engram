@@ -363,3 +363,81 @@ class TestMCPConsultation:
         result = consult_done(conv_id=conv_id, summary="Decided X")
         assert "Completed" in result
         assert "Decided X" in result
+
+
+class TestMCPSafeMode:
+    """Safe mode (ENGRAM_SAFE_MODE) must keep local project-memory tools but
+    drop every tool that can reach an external LLM provider or read API keys."""
+
+    _CONSULT = {
+        "start_consultation", "start_consultation_file", "consult_say",
+        "consult_show", "consult_done", "list_models",
+    }
+    _MEMORY = {
+        "post_event", "query", "briefing", "status", "resolve_event",
+        "session_start",
+    }
+
+    @staticmethod
+    def _registered_tool_names(module):
+        import asyncio
+        return {t.name for t in asyncio.run(module.mcp.list_tools())}
+
+    def test_normal_mode_registers_consult_tools(self, monkeypatch):
+        import importlib
+        from engram import mcp_server
+        monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+        importlib.reload(mcp_server)
+        try:
+            names = self._registered_tool_names(mcp_server)
+            assert self._CONSULT <= names
+            assert self._MEMORY <= names
+            assert mcp_server.SAFE_MODE is False
+        finally:
+            monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+            importlib.reload(mcp_server)
+
+    def test_safe_mode_omits_consult_tools(self, monkeypatch):
+        import importlib
+        from engram import mcp_server
+        monkeypatch.setenv("ENGRAM_SAFE_MODE", "1")
+        importlib.reload(mcp_server)
+        try:
+            names = self._registered_tool_names(mcp_server)
+            assert not (self._CONSULT & names)   # no external-LLM tools advertised
+            assert self._MEMORY <= names          # local memory tools intact
+            assert mcp_server.SAFE_MODE is True
+        finally:
+            monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+            importlib.reload(mcp_server)
+
+    def test_status_reports_external_llm_flag(self, mcp_project, monkeypatch):
+        import importlib
+        from engram import mcp_server
+        # Normal mode: flag true.
+        monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+        importlib.reload(mcp_server)
+        assert json.loads(mcp_server.status())["external_llm_tools"] is True
+        # Safe mode: flag false.
+        monkeypatch.setenv("ENGRAM_SAFE_MODE", "1")
+        importlib.reload(mcp_server)
+        try:
+            assert json.loads(mcp_server.status())["external_llm_tools"] is False
+        finally:
+            monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+            importlib.reload(mcp_server)
+
+    def test_safe_entry_forces_env_before_delegating(self, monkeypatch):
+        import importlib
+        from engram import mcp_server, mcp_safe
+        monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+        seen = {}
+
+        def fake_server_main():
+            seen["env"] = os.environ.get("ENGRAM_SAFE_MODE")
+
+        monkeypatch.setattr(mcp_server, "main", fake_server_main)
+        mcp_safe.main()
+        assert seen["env"] == "1"
+        monkeypatch.delenv("ENGRAM_SAFE_MODE", raising=False)
+        importlib.reload(mcp_server)

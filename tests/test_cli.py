@@ -49,6 +49,13 @@ class TestInit:
         result = runner.invoke(cli, ["-p", str(git_project), "init"])
         assert "already initialized" in result.output
 
+    def test_init_no_claude_md(self, runner, git_project):
+        result = runner.invoke(cli, ["-p", str(git_project), "init", "--no-claude-md"])
+        assert result.exit_code == 0
+        assert "Engram initialized" in result.output
+        assert "Skipped CLAUDE.md" in result.output
+        assert not (git_project / "CLAUDE.md").exists()
+
     def test_init_writes_claude_md(self, runner, git_project):
         result = runner.invoke(cli, ["-p", str(git_project), "init"])
         assert "CLAUDE.md" in result.output
