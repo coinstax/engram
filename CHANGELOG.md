@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.9.0 — 2026-07-16
+## v1.9.0 — 2026-07-17
 
 Adds a safe mode for the MCP server: give an agent project memory without the ability to reach external LLM providers or read API keys from the environment. A single server, gated by an env var — no duplicated entry point to drift out of sync.
 
