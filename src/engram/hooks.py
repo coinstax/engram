@@ -254,11 +254,14 @@ def _handle_file_mutation(tool_input: dict, stdin_data: dict,
     if not file_path:
         return
 
-    # Make path relative to project if possible
+    # Make path relative to project if possible. Always store POSIX-style
+    # forward slashes: scope prefixes are forward-slash throughout Engram
+    # (queries, briefings, areas.json), so a Windows-native "src\foo.py" would
+    # silently never match a "src/" scope filter.
     try:
-        rel_path = str(Path(file_path).relative_to(project_dir))
+        rel_path = Path(file_path).relative_to(project_dir).as_posix()
     except ValueError:
-        rel_path = file_path
+        rel_path = Path(file_path).as_posix()
 
     if _should_debounce(project_dir, rel_path):
         return
