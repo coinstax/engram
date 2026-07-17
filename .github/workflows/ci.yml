@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (with all extras)
+        run: python -m pip install -e ".[all]"
+
+      - name: Unit tests
+        run: python -m pytest tests/ -q
+
+      # End-to-end: launch the engram-mcp console script over MCP stdio the way
+      # Claude Code loads the plugin, and check it operates on the right DB.
+      # The Windows leg guards issue #1 (ENGRAM_PROJECT_DIR=${PWD} silently read
+      # an empty DB) — a bug no pure-Python unit test can catch.
+      - name: MCP plugin smoke (Windows-relevant e2e)
+        run: python scripts/e2e_mcp_smoke.py
